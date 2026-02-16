@@ -76,10 +76,10 @@ const handleLogin = async () => {
     
     const { access_token, user } = response.data
     
-    localStorage.setItem('access_token', access_token)
-    localStorage.setItem('user_id', user.id)
-    localStorage.setItem('user_role', user.role)
-    localStorage.setItem('user_name', user.username)
+    sessionStorage.setItem('access_token', access_token)
+    sessionStorage.setItem('user_id', user.id)
+    sessionStorage.setItem('user_role', user.role)
+    sessionStorage.setItem('user_name', user.username)
     
     if (loginForm.remember) {
       localStorage.setItem('remember_user', loginForm.username)

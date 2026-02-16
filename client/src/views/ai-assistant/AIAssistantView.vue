@@ -99,7 +99,7 @@ const isLoading = ref(false)
 const messagesContainer = ref<HTMLElement>()
 
 const userName = computed(() => {
-  return localStorage.getItem('user_name') || '用户'
+  return sessionStorage.getItem('user_name') || '用户'
 })
 
 const userInitial = computed(() => {
@@ -151,7 +151,7 @@ const sendMessage = async () => {
     // 获取AI配置
     const configRes = await fetch('/api/llm/config', {
       headers: {
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
+        'Authorization': `Bearer ${sessionStorage.getItem('access_token')}`
       }
     })
 
@@ -167,9 +167,9 @@ const sendMessage = async () => {
     const res = await fetch('/api/llm/chat', {
       method: 'POST',
       headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${localStorage.getItem('access_token')}`
-      },
+          'Content-Type': 'application/json',
+          'Authorization': `Bearer ${sessionStorage.getItem('access_token')}`
+        },
       body: JSON.stringify({
         prompt: input,
         system_prompt: getSystemPrompt(),

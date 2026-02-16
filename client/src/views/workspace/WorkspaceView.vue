@@ -1,457 +1,400 @@
 <template>
   <div class="workspace-container">
-    <div class="workspace-layout">
-      <!-- 左侧边栏：连接管理 -->
-      <aside class="connections-sidebar" :class="{ 'collapsed': sidebarCollapsed }">
-        <div class="sidebar-header">
-          <h2 v-if="!sidebarCollapsed">连接</h2>
-          <el-icon class="collapse-btn" @click="sidebarCollapsed = !sidebarCollapsed">
-            <DArrowLeft v-if="!sidebarCollapsed" />
-            <DArrowRight v-else />
-          </el-icon>
-        </div>
-        
-        <div class="sidebar-content" v-show="!sidebarCollapsed">
-          <!-- 添加连接按钮 -->
-          <el-button type="primary" class="add-connection-btn" @click="openAddConnectionDialog">
-            <el-icon><Plus /></el-icon>
-            <span>添加服务器</span>
+    <!-- 侧边栏：连接管理 -->
+    <aside class="sidebar" :class="{ collapsed: isSidebarCollapsed }">
+      <div class="sidebar-header">
+        <div class="sidebar-header-left">
+          <h3>服务器</h3>
+          <el-button
+            type="text"
+            size="small"
+            @click="toggleSidebar"
+            class="sidebar-toggle"
+            :class="{ collapsed: isSidebarCollapsed }"
+          >
+            <template #icon>
+              <el-icon v-if="isSidebarCollapsed">
+                <svg viewBox="0 0 1024 1024" width="16" height="16" fill="currentColor">
+                  <path d="M768 192l-256 256 256 256z" />
+                  <path d="M768 192l-256 256 256 256z" />
+                </svg>
+              </el-icon>
+              <ArrowLeft v-else />
+            </template>
           </el-button>
-          
-          <!-- 连接列表 -->
-          <div class="connections-list" v-loading="loadingConnections">
-            <div 
-              v-for="conn in connections" 
-              :key="conn.id"
-              class="connection-item"
-              :class="{ 'active': activeSession?.connectionId === conn.id }"
-              @click="handleServerClick(conn)"
-            >
-              <div class="conn-icon">
-                <el-icon :size="24"><Monitor /></el-icon>
-              </div>
-              <div class="conn-info">
-                <div class="conn-name">{{ conn.name }}</div>
-                <div class="conn-host">{{ conn.host }}:{{ conn.port }}</div>
-              </div>
-              <div class="conn-actions" @click.stop>
-                <!-- 点击 + 号明确调用新建 -->
-                <el-icon @click.stop="createNewSession(conn)" title="开新窗口"><Plus /></el-icon>
-                <el-icon @click.stop="editConnection(conn)"><Edit /></el-icon>
-                <el-icon @click.stop="deleteConnection(conn.id)" class="delete-icon"><Delete /></el-icon>
-              </div>
-              <div class="conn-status" v-if="activeSession?.connectionId === conn.id">
-                <span class="status-dot"></span>
+        </div>
+        <el-button type="primary" size="small" @click="openAddConnectionDialog" :icon="Plus">
+          添加
+        </el-button>
+      </div>
+
+      <div class="connections-list">
+        <div class="loading-wrapper" v-if="loadingConnections">
+          <el-skeleton :rows="3" animated />
+        </div>
+        <div v-else>
+          <div
+            v-for="conn in connections"
+            :key="conn.id"
+            class="conn-item"
+            :class="{ active: hasTabForConnection(conn.id) }"
+            @click="connectToServer(conn)"
+          >
+            <div class="conn-info">
+              <el-icon class="conn-icon"><Monitor /></el-icon>
+              <div class="conn-details">
+                <span class="conn-name">{{ conn.name }}</span>
+                <span class="conn-host">{{ conn.host }}</span>
               </div>
             </div>
-            
-            <el-empty v-if="!loadingConnections && connections.length === 0" description="暂无连接" :image-size="60" />
+            <div class="conn-actions" @click.stop>
+              <!-- 新增：在同一连接上再开一个终端 -->
+              <el-tooltip content="新开终端" placement="top" :show-after="500">
+                <el-icon @click="openNewTab(conn)" class="action-icon add-icon"><Plus /></el-icon>
+              </el-tooltip>
+              <el-tooltip content="编辑" placement="top" :show-after="500">
+                <el-icon @click="editConnection(conn)" class="action-icon"><Edit /></el-icon>
+              </el-tooltip>
+              <el-tooltip content="删除" placement="top" :show-after="500">
+                <el-icon @click="deleteConnection(conn.id)" class="action-icon delete-icon"><Delete /></el-icon>
+              </el-tooltip>
+            </div>
+            <!-- 连接状态指示（如果有此连接的标签） -->
+            <div class="conn-status" v-if="hasTabForConnection(conn.id)">
+              <span class="status-dot" :class="getConnectionStatusClass(conn.id)"></span>
+            </div>
           </div>
-        </div>
-      </aside>
-      
-      <!-- 主内容区：终端 -->
-      <main class="terminal-main">
-        <!-- 标签栏 -->
-        <div class="terminal-tabs" v-if="sessions.length > 0">
-          <div 
-            v-for="s in sessions" 
-            :key="s.id" 
-            class="tab-item" 
-            :class="{ active: activeSessionId === s.id }"
-            @click="switchSession(s.id)"
-          >
-            <span 
-              class="status-dot" 
-              :class="s.status"
-              @click="s.status === 'disconnected' && reconnectSession(s)"
-              :title="s.status === 'disconnected' ? '点击重连' : ''"
-            ></span>
-            <span class="tab-name">{{ s.displayName }}</span>
-            <el-icon class="close-icon" @click.stop="closeSession(s.id)"><Close /></el-icon>
-          </div>
-        </div>
 
-        <!-- 欢迎界面 (无会话时) -->
-        <div class="welcome-panel" v-if="sessions.length === 0">
-          <div class="welcome-content">
-            <el-icon class="welcome-icon"><Monitor /></el-icon>
-            <h2>连接到服务器</h2>
-            <p>从左侧选择一个服务器连接，或添加新的连接开始使用终端</p>
-            <el-button type="primary" size="large" @click="openAddConnectionDialog">
-              <el-icon><Plus /></el-icon>
-              添加服务器
+          <el-empty v-if="connections.length === 0" description="暂无连接" :image-size="60" />
+        </div>
+      </div>
+    </aside>
+
+    <!-- 主内容区 -->
+    <main class="terminal-main">
+      <!-- 终端标签栏 -->
+      <div class="terminal-tabs" v-if="tabs.length > 0">
+        <div
+          v-for="tab in tabs"
+          :key="tab.id"
+          class="tab-item"
+          :class="{ active: tab.id === activeTabId }"
+          @click="switchTab(tab.id)"
+        >
+          <span class="tab-status-dot" :class="getTabStatusClass(tab)"></span>
+          <span class="tab-name">{{ tab.name }}</span>
+          <span class="tab-index" v-if="getTabCountForConnection(tab.connectionId) > 1">
+            #{{ getTabIndexForConnection(tab) }}
+          </span>
+          <el-icon class="tab-close" @click.stop="closeTab(tab.id)"><Close /></el-icon>
+        </div>
+        <div class="tab-add" @click.stop="toggleNewTabMenu">
+          <el-icon><Plus /></el-icon>
+        </div>
+        <!-- 新标签菜单 -->
+        <div class="new-tab-menu" v-if="showNewTabMenu" ref="newTabMenuRef">
+          <div
+            v-for="conn in connections"
+            :key="conn.id"
+            class="menu-item"
+            @click="openNewTab(conn); showNewTabMenu = false"
+          >
+            <el-icon><Monitor /></el-icon>
+            <span>{{ conn.name }} ({{ conn.host }})</span>
+          </div>
+          <el-empty v-if="connections.length === 0" description="暂无连接" :image-size="40" />
+        </div>
+      </div>
+
+      <!-- 未连接时的欢迎界面 -->
+      <div class="welcome-panel" v-if="tabs.length === 0">
+        <div class="welcome-content">
+          <el-icon class="welcome-icon"><Monitor /></el-icon>
+          <h2>连接到服务器</h2>
+          <p>从左侧选择一个服务器连接，或添加新的连接开始使用终端</p>
+          <el-button type="primary" size="large" @click="openAddConnectionDialog">
+            <el-icon><Plus /></el-icon>
+            添加服务器
+          </el-button>
+        </div>
+      </div>
+
+      <!-- 终端面板 - 每个tab一个，用v-show保持DOM不销毁 -->
+      <div
+        v-for="tab in tabs"
+        :key="tab.id"
+        class="terminal-panel"
+        v-show="tab.id === activeTabId"
+      >
+        <div class="terminal-header">
+          <div class="terminal-info">
+            <span class="server-name">{{ tab.name }}</span>
+            <el-tag size="small" :type="getStatusTagType(tab)">
+              {{ getStatusText(tab) }}
+            </el-tag>
+            <el-tag size="small" :type="tab.agentMode ? 'success' : 'info'">
+              {{ tab.agentMode ? 'Agent' : 'Shell' }}
+            </el-tag>
+            <el-tag size="small" type="info" v-if="tab.connectionStatus === 'connected'">{{ tab.wsLatency }}ms</el-tag>
+          </div>
+          <div class="terminal-controls">
+            <el-switch
+              v-model="tab.agentMode"
+              active-text="Agent"
+              inactive-text="Shell"
+              size="small"
+            />
+            <el-button
+              v-if="tab.connectionStatus === 'disconnected'"
+              type="warning"
+              size="small"
+              @click="reconnectTab(tab)"
+            >
+              <el-icon><RefreshRight /></el-icon>
+              重连
+            </el-button>
+            <el-button type="danger" size="small" @click="closeTab(tab.id)">
+              断开
             </el-button>
           </div>
         </div>
 
-        <!-- 终端面板 (动态切换) -->
-        <div class="terminal-container" v-show="sessions.length > 0">
-          <div 
-            v-for="s in sessions" 
-            :key="s.id" 
-            v-show="activeSessionId === s.id"
-            class="terminal-instance-wrapper"
-          >
-            <!-- 终端头部 -->
-            <div class="terminal-header">
-              <div class="terminal-info">
-                <span class="server-name">{{ s.displayName }}</span>
-                <el-tag size="small" :type="s.agentMode ? 'success' : 'info'">
-                  {{ s.agentMode ? 'Agent' : 'Shell' }}
-                </el-tag>
-                <el-tag size="small" type="info">{{ s.wsLatency }}ms</el-tag>
-              </div>
-              <div class="terminal-controls">
-                <el-switch 
-                  v-model="s.agentMode" 
-                  active-text="Agent" 
-                  inactive-text="Shell"
+        <!-- 连接状态提示 -->
+        <div class="status-banner connecting" v-if="tab.connectionStatus === 'connecting'">
+          <el-icon class="rotating"><Loading /></el-icon>
+          <span>{{ tab.statusMessage || '正在连接...' }}</span>
+        </div>
+        <div class="status-banner error" v-if="tab.connectionStatus === 'disconnected' && tab.errorMessage">
+          <el-icon><WarningFilled /></el-icon>
+          <span>{{ tab.errorMessage }}</span>
+          <el-button size="small" type="warning" @click="reconnectTab(tab)">重连</el-button>
+        </div>
+
+        <!-- 终端容器 -->
+        <div class="terminal-container" :ref="(el) => setTerminalRef(tab.id, el as HTMLElement)"></div>
+
+        <!-- 等待指示器 -->
+        <div class="waiting-indicator" v-if="tab.isWaitingCommandFinish && !tab.showCommandConfirm">
+          <el-icon class="rotating"><Loading /></el-icon>
+          <span>等待命令执行完成...</span>
+          <span class="waiting-time">{{ formatWaitingTime(tab) }}</span>
+          <el-button size="small" type="warning" @click="forceStopWaiting(tab)">强制结束</el-button>
+        </div>
+
+        <!-- 交互式提示 -->
+        <div class="interactive-hint" v-if="tab.interactiveHint?.message">
+          <el-alert :title="tab.interactiveHint.message" type="warning" :closable="false" show-icon>
+            <template #default>
+              <div class="hint-actions">
+                <el-button
+                  v-for="action in tab.interactiveHint.actions"
+                  :key="action.label"
                   size="small"
-                  @change="updateSessionAgentMode(s.id, s.agentMode)"
-                />
-                <el-button type="danger" size="small" @click="disconnectServer(s.id)">
-                  断开
+                  @click="sendInteractiveAction(tab, action.data)"
+                >
+                  {{ action.label }}
                 </el-button>
               </div>
-            </div>
+            </template>
+          </el-alert>
+        </div>
 
-            <!-- 终端内容 -->
-            <div class="terminal-wrapper">
-              <div :id="'terminal-' + s.id" class="terminal"></div>
-            </div>
-
-            <!-- 底部区域 -->
-            <div class="terminal-bottom-bar" v-if="s.agentMode">
-              <!-- 命令确认栏 -->
-              <div class="command-confirm-bar" v-if="s.showCommandConfirm">
-                <div class="confirm-label">是否同意执行以下命令并查看输出？</div>
-                <div class="confirm-command-wrapper">
-                  <el-input
-                    v-if="s.isEditingCommand"
-                    v-model="s.editableCommand"
-                    type="textarea"
-                    :autosize="{ minRows: 1, maxRows: 6 }"
-                    class="command-edit-input"
-                    @keyup.enter.ctrl="confirmEditedCommand(s.id)"
-                    @keyup.escape="cancelEditCommand(s.id)"
-                  />
-                  <code v-else class="confirm-command-text">{{ s.aiSuggestedCommand }}</code>
-                </div>
-                <div class="confirm-actions">
-                  <template v-if="!s.isEditingCommand">
-                    <el-button type="success" size="small" @click="confirmAICommand(s.id)">
-                      执行 <span class="shortcut">Ctrl+D</span>
-                    </el-button>
-                    <el-button type="warning" size="small" @click="enterEditMode(s.id)">
-                      修改 <span class="shortcut">Ctrl+E</span>
-                    </el-button>
-                    <el-button type="danger" size="small" @click="rejectCommand(s.id)">
-                      拒绝 <span class="shortcut">Ctrl+I</span>
-                    </el-button>
-                  </template>
-                  <template v-else>
-                    <el-button type="primary" size="small" @click="confirmEditedCommand(s.id)">
-                      确认修改 <span class="shortcut">Ctrl+Enter</span>
-                    </el-button>
-                    <el-button size="small" @click="cancelEditCommand(s.id)">
-                      取消 <span class="shortcut">Esc</span>
-                    </el-button>
-                  </template>
-                </div>
-              </div>
-              
-              <!-- 交互式操作栏 -->
-              <div class="interactive-bar" v-else-if="s.interactiveState">
-                <div class="interactive-header">
-                  <el-icon color="#e6a23c"><WarningFilled /></el-icon>
-                  <span class="interactive-message">{{ s.interactiveHint.message }}</span>
-                  <span class="interactive-elapsed">({{ s.waitingElapsed }}s)</span>
-                </div>
-                <div class="interactive-actions">
-                  <el-button
-                    v-for="action in s.interactiveHint.actions"
-                    :key="action.label"
-                    size="small"
-                    type="primary"
-                    @click="sendInteractiveInput(s.id, action.data)"
-                  >
-                    {{ action.label }}
-                  </el-button>
-                  <el-divider direction="vertical" />
-                  <el-input
-                    v-model="s.customInteractiveInput"
-                    placeholder="自定义输入..."
-                    size="small"
-                    style="width: 200px;"
-                    @keyup.enter="sendCustomInteractiveInput(s.id)"
-                  >
-                    <template #append>
-                      <el-button size="small" @click="sendCustomInteractiveInput(s.id)">发送</el-button>
-                    </template>
-                  </el-input>
-                  <el-divider direction="vertical" />
-                  <el-button size="small" type="info" @click="sendInteractiveInput(s.id, '\x03')">
-                    中断 Ctrl+C
-                  </el-button>
-                  <el-button size="small" type="danger" text @click="forceStopWaiting(s.id)">
-                    强制结束
-                  </el-button>
-                </div>
-              </div>
-              
-              <!-- 等待提示 -->
-              <div class="waiting-bar" v-else-if="s.isWaitingCommandFinish">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                <span>命令执行中，等待完成... ({{ s.waitingElapsed }}s)</span>
-                <el-button size="small" text @click="sendCtrlC(s.id)">中断 Ctrl+C</el-button>
-                <el-button size="small" text type="danger" @click="forceStopWaiting(s.id)">强制结束</el-button>
-              </div>
-              
-              <!-- AI分析中 -->
-              <div class="waiting-bar" v-else-if="s.isProcessingAI">
-                <el-icon class="is-loading"><Loading /></el-icon>
-                <span>AI 正在分析...</span>
-              </div>
-
-              <!-- 普通输入栏 -->
-              <div class="input-area" v-else>
-                <el-input
-                  v-model="s.userInputText"
-                  :placeholder="s.agentMode ? '输入自然语言或命令，AI将智能响应' : '输入命令...'"
-                  @keyup.enter="handleUserSubmit(s.id)"
-                  clearable
-                  size="large"
-                >
-                  <template #prefix>
-                    <span class="prompt-prefix">{{ s.promptPrefix }}</span>
-                  </template>
-                  <template #append>
-                    <el-button @click="handleUserSubmit(s.id)">
-                      <el-icon><Promotion /></el-icon>
-                    </el-button>
-                  </template>
-                </el-input>
-              </div>
-            </div>
-            
-            <!-- Shell模式下不显示底部栏 -->
-            <!-- 这样终端会自动占满整个空间 -->
+        <!-- 命令确认框 -->
+        <div class="command-confirm" v-if="tab.showCommandConfirm">
+          <div class="confirm-header">
+            <el-icon><WarningFilled /></el-icon>
+            <span>是否同意执行以下命令？</span>
+          </div>
+          <div class="confirm-command">
+            <code>{{ tab.aiSuggestedCommand }}</code>
+          </div>
+          <div class="confirm-actions">
+            <el-button type="primary" size="small" @click="confirmCommand(tab)">
+              <el-icon><Check /></el-icon> 执行
+            </el-button>
+            <el-button size="small" @click="rejectCommand(tab)">
+              <el-icon><Close /></el-icon> 拒绝
+            </el-button>
           </div>
         </div>
-      </main>
-    </div>
-    
+
+        <!-- 输入框 -->
+        <div class="input-bar" v-if="tab.agentMode">
+          <el-input
+            v-model="tab.userInputText"
+            :placeholder="'输入自然语言指令或直接命令...'"
+            @keyup.enter="handleUserSubmit(tab)"
+            :disabled="tab.isProcessingAI"
+            clearable
+          >
+            <template #prefix>
+              <el-icon><Promotion /></el-icon>
+            </template>
+            <template #append>
+              <el-button
+                @click="handleUserSubmit(tab)"
+                :loading="tab.isProcessingAI"
+                type="primary"
+              >
+                发送
+              </el-button>
+            </template>
+          </el-input>
+        </div>
+      </div>
+    </main>
+
     <!-- 添加/编辑连接对话框 -->
-    <el-dialog v-model="showConnectionDialog" :title="isEditing ? '编辑连接' : '添加连接'" width="600px">
-      <el-form :model="connectionForm" label-width="120px">
-        <el-form-item label="名称">
-          <el-input v-model="connectionForm.name" placeholder="请输入连接名称" />
+    <el-dialog
+      v-model="showConnectionDialog"
+      :title="editingConnection ? '编辑连接' : '添加连接'"
+      width="520px"
+      :close-on-click-modal="false"
+    >
+      <el-form :model="connectionForm" :rules="connectionRules" ref="connectionFormRef" label-width="100px">
+        <el-form-item label="连接名称" prop="name">
+          <el-input v-model="connectionForm.name" placeholder="例：生产服务器" />
         </el-form-item>
-        <el-form-item label="分组">
-          <el-input v-model="connectionForm.group_name" placeholder="default" />
+        <el-form-item label="主机地址" prop="host">
+          <el-input v-model="connectionForm.host" placeholder="例：192.168.1.100" />
         </el-form-item>
-        <el-form-item label="协议">
-          <el-select v-model="connectionForm.protocol" style="width: 100%">
-            <el-option label="SSH" value="ssh" />
-            <el-option label="SFTP" value="sftp" />
-          </el-select>
+        <el-form-item label="端口" prop="port">
+          <el-input-number v-model="connectionForm.port" :min="1" :max="65535" />
         </el-form-item>
-        <el-form-item label="主机">
-          <el-input v-model="connectionForm.host" placeholder="请输入主机地址或IP" />
+        <el-form-item label="用户名" prop="username">
+          <el-input v-model="connectionForm.username" placeholder="例：root" />
         </el-form-item>
-        <el-form-item label="端口">
-          <el-input-number v-model="connectionForm.port" :min="1" :max="65535" style="width: 100%" />
-        </el-form-item>
-        <el-form-item label="用户名">
-          <el-input v-model="connectionForm.username" placeholder="请输入用户名" />
-        </el-form-item>
-        <el-form-item label="认证方式">
+        <el-form-item label="认证方式" prop="auth_method">
           <el-radio-group v-model="connectionForm.auth_method">
-            <el-radio label="password">密码认证</el-radio>
-            <el-radio label="privatekey">私钥认证</el-radio>
+            <el-radio value="password">密码</el-radio>
+            <el-radio value="private_key">私钥</el-radio>
           </el-radio-group>
         </el-form-item>
-        <el-form-item label="密码" v-if="connectionForm.auth_method === 'password'">
-          <el-input v-model="connectionForm.password" type="password" placeholder="请输入密码" show-password />
+        <el-form-item v-if="connectionForm.auth_method === 'password'" label="密码" prop="password">
+          <el-input v-model="connectionForm.password" type="password" show-password placeholder="输入密码" />
         </el-form-item>
-        <el-form-item label="私钥" v-if="connectionForm.auth_method === 'privatekey'">
-          <el-input type="textarea" v-model="connectionForm.private_key" :rows="4" placeholder="请输入SSH私钥内容" />
+        <el-form-item v-if="connectionForm.auth_method === 'private_key'" label="私钥" prop="private_key">
+          <el-input v-model="connectionForm.private_key" type="textarea" :rows="4" placeholder="粘贴私钥内容" />
         </el-form-item>
-        <el-form-item label="密钥密码" v-if="connectionForm.auth_method === 'privatekey'">
-          <el-input v-model="connectionForm.passphrase" type="password" placeholder="如果私钥有密码保护，请输入" show-password />
-        </el-form-item>
-        <el-form-item label="标签">
-          <el-input v-model="connectionForm.tags" placeholder="多个标签用逗号分隔" />
+        <el-form-item v-if="connectionForm.auth_method === 'private_key'" label="密钥密码">
+          <el-input v-model="connectionForm.passphrase" type="password" show-password placeholder="私钥密码（可选）" />
         </el-form-item>
         <el-form-item label="描述">
-          <el-input type="textarea" v-model="connectionForm.description" :rows="2" placeholder="可选描述信息" />
+          <el-input v-model="connectionForm.description" type="textarea" :rows="2" placeholder="连接描述（可选）" />
         </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="showConnectionDialog = false">取消</el-button>
-        <el-button type="primary" @click="saveConnection">保存</el-button>
+        <el-button type="info" @click="testConnectionClick" :loading="testingConnection">测试连接</el-button>
+        <el-button type="primary" @click="saveConnection" :loading="savingConnection">保存</el-button>
       </template>
     </el-dialog>
-
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, computed, onMounted, onUnmounted, nextTick, reactive } from 'vue'
-import { ElMessage, ElMessageBox } from 'element-plus'
-import { Loading, Plus, Edit, Delete, Monitor, DArrowLeft, DArrowRight, WarningFilled, Promotion, Close } from '@element-plus/icons-vue'
-import { http } from '@/utils/api'
+import { ref, reactive, onMounted, onBeforeUnmount, onActivated, onDeactivated, nextTick, watch, computed } from 'vue'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
+import { WebLinksAddon } from '@xterm/addon-web-links'
 import '@xterm/xterm/css/xterm.css'
+import {
+  Monitor, Plus, Edit, Delete, Close, Check, Promotion,
+  WarningFilled, Loading, RefreshRight, ArrowLeft, ArrowRight
+} from '@element-plus/icons-vue'
+import { ElMessage, ElMessageBox } from 'element-plus'
+import http from '@/utils/http'
 
-// ==================== 会话接口定义 ====================
-interface TerminalSession {
-  id: string;             // 唯一实例ID
-  connectionId: number;   // 关联的服务器ID
-  displayName: string;    // 显示名称，如 "本地 #2"
-  status: 'connected' | 'disconnected' | 'connecting';
-  terminal: Terminal | null;          // xterm 实例
-  fitAddon: FitAddon | null;          // 适应插件
-  socket: WebSocket | null;
-  agentMode: boolean;
-  history: {role: string, content: string}[];         // 对话历史
-  isWaitingCommandFinish: boolean;     // 是否正在等待AI/命令
-  wsLatency: number;                   // WebSocket延迟
-  recentTerminalOutput: string;        // 最近终端输出
-  aiSuggestedCommand: string;          // AI建议命令
-  lastAICommand: string;               // 最后执行的AI命令
-  showCommandConfirm: boolean;         // 显示命令确认
-  isEditingCommand: boolean;           // 正在编辑命令
-  editableCommand: string;             // 可编辑命令
-  userInputText: string;               // 用户输入文本
-  customInteractiveInput: string;      // 自定义交互输入
-  waitingStartTime: number;            // 等待开始时间
-  waitingElapsed: number;              // 等待已用时间
-  waitingTimer: ReturnType<typeof setInterval> | null;
-  interactiveState: string | null;     // 交互状态
-  interactiveHint: { message: string, actions: any[] };  // 交互提示
-  isProcessingAI: boolean;             // AI处理中
-  currentSessionId: string | null;     // 当前对话会话ID
-  promptPrefix: string;                // 提示符前缀
-  latencyTimer: ReturnType<typeof setInterval> | null;  // 延迟检测定时器
+// 声明组件名称，供 keep-alive 使用
+defineOptions({
+  name: 'WorkspaceView'
+})
+
+// ==================== 类型定义 ====================
+interface ServerConnection {
+  id: string
+  name: string
+  host: string
+  port: number
+  username: string
+  auth_method: string
+  description?: string
+  tags?: string
 }
 
-// ==================== 基础状态 ====================
-const connections = ref<any[]>([])
-const sessions = ref<TerminalSession[]>([]);
-const activeSessionId = ref<string | null>(null);
+interface TerminalTab {
+  id: string
+  name: string
+  connectionId: string
+  connection: ServerConnection
+  terminal: Terminal | null
+  fitAddon: FitAddon | null
+  ws: WebSocket | null
+  clientId: string
+  connectionStatus: 'connecting' | 'connected' | 'disconnected'
+  statusMessage: string
+  errorMessage: string
+  wsLatency: number
+  agentMode: boolean
+  isProcessingAI: boolean
+  conversationHistory: { role: string; content: string }[]
+  currentSessionId: string | null
+  recentTerminalOutput: string
+  aiSuggestedCommand: string
+  lastAICommand: string
+  showCommandConfirm: boolean
+  userInputText: string
+  isWaitingCommandFinish: boolean
+  waitingStartTime: number
+  waitingTimer: ReturnType<typeof setInterval> | null
+  interactiveState: string | null
+  interactiveHint: { message: string; actions: { label: string; data: string }[] }
+  isManualCommand?: boolean
+}
+
+// ==================== 连接管理状态 ====================
+const connections = ref<ServerConnection[]>([])
 const loadingConnections = ref(false)
 const showConnectionDialog = ref(false)
-const isEditing = ref(false)
-const connectionForm = ref<any>({})
+const editingConnection = ref<ServerConnection | null>(null)
+const connectionFormRef = ref()
+const testingConnection = ref(false)
+const savingConnection = ref(false)
 
-// 最大等待时间（秒）
-const MAX_WAIT_SECONDS = 300
+const connectionForm = reactive({
+  name: '',
+  host: '',
+  port: 22,
+  username: 'root',
+  auth_method: 'password',
+  password: '',
+  private_key: '',
+  passphrase: '',
+  description: '',
+  tags: '',
+})
 
-// ==================== 计算属性 ====================
-const activeSession = computed(() => sessions.value.find(s => s.id === activeSessionId.value));
-const activeConnection = computed(() => {
-  const session = activeSession.value;
-  if (!session) return null;
-  return connections.value.find(conn => conn.id === session.connectionId);
-});
+const connectionRules = {
+  name: [{ required: true, message: '请输入连接名称', trigger: 'blur' }],
+  host: [{ required: true, message: '请输入主机地址', trigger: 'blur' }],
+  username: [{ required: true, message: '请输入用户名', trigger: 'blur' }],
+}
 
-// ==================== 会话管理函数 ====================
-/**
- * 强制新建会话 (点击图标 + 时调用)
- */
-const createNewSession = async (connection: any) => {
-  // 计算名称序号 (例如: 本地 #2)
-  const count = sessions.value.filter(s => s.connectionId === connection.id).length;
-  const displayName = count === 0 ? connection.name : `${connection.name} #${count + 1}`;
-  
-  const sessionId = `sess_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
-  
-  // 创建响应式session对象
-  const newSession = reactive<TerminalSession>({
-    id: sessionId,
-    connectionId: connection.id,
-    displayName: displayName,
-    status: 'connecting',
-    terminal: null,
-    fitAddon: null,
-    socket: null,
-    agentMode: true, // 默认开启 Agent 模式
-    history: [],
-    isWaitingCommandFinish: false,
-    wsLatency: 0,
-    recentTerminalOutput: '',
-    aiSuggestedCommand: '',
-    lastAICommand: '',
-    showCommandConfirm: false,
-    isEditingCommand: false,
-    editableCommand: '',
-    userInputText: '',
-    customInteractiveInput: '',
-    waitingStartTime: 0,
-    waitingElapsed: 0,
-    waitingTimer: null,
-    interactiveState: null,
-    interactiveHint: { message: '', actions: [] },
-    isProcessingAI: false, // AI处理中
-    currentSessionId: null, // 这个由后端 createChatSession 后返回
-    promptPrefix: `${connection.username}@${connection.name}:~$`,
-    latencyTimer: null // 延迟检测定时器
-  });
+// ==================== 多标签终端管理 ====================
+const tabs = ref<TerminalTab[]>([])
+const activeTabId = ref<string | null>(null)
+const showNewTabMenu = ref(false)
+const newTabMenuRef = ref<HTMLElement | null>(null)
+const terminalRefs = ref<Record<string, HTMLElement | null>>({})
 
-  sessions.value.push(newSession);
-  activeSessionId.value = sessionId;
+// ==================== 侧边栏管理 ====================
+const isSidebarCollapsed = ref(false)
 
-  await nextTick();
-  await initSessionTerminal(newSession, connection);
-};
+const toggleSidebar = () => {
+  isSidebarCollapsed.value = !isSidebarCollapsed.value
+}
 
-/**
- * 切换会话
- */
-const switchSession = (id: string) => {
-  activeSessionId.value = id;
-  // 必须调用 xterm 的 focus 和 refresh
-  nextTick(() => {
-    const session = sessions.value.find(s => s.id === id);
-    session?.terminal?.focus();
-  });
-};
-
-/**
- * 关闭会话
- */
-const closeSession = async (id: string) => {
-  const sessionIndex = sessions.value.findIndex(s => s.id === id);
-  if (sessionIndex === -1) return;
-
-  const session = sessions.value[sessionIndex];
-  
-  // 断开连接
-  await disconnectServer(id);
-  
-  // 从数组中移除
-  sessions.value.splice(sessionIndex, 1);
-  
-  // 如果关闭的是活动会话，切换到第一个会话
-  if (activeSessionId.value === id) {
-    activeSessionId.value = sessions.value.length > 0 ? sessions.value[0].id : null;
-  }
-};
-
-/**
- * 更新会话Agent模式
- */
-const updateSessionAgentMode = (id: string, mode: boolean) => {
-  const session = sessions.value.find(s => s.id === id);
-  if (session) {
-    session.agentMode = mode;
-  }
-};
-
-// 命令预处理配置 - 避免进入交互式分页器
+// 命令预处理
 const PAGEBOUND_COMMANDS: Record<string, string> = {
   'dpkg': 'dpkg -l | head -200',
   'journalctl': 'journalctl --no-pager -n 100',
@@ -464,84 +407,97 @@ const PAGEBOUND_COMMANDS: Record<string, string> = {
   'lsof': 'lsof | head -100',
 }
 
-/**
- * 预处理命令，添加非交互式标志避免进入分页器
- */
-const preprocessCommand = (cmd: string): string => {
-  const trimmed = cmd.trim()
-  
-  // 检查是否在预配置列表中
-  for (const [key, replacement] of Object.entries(PAGEBOUND_COMMANDS)) {
-    if (trimmed.startsWith(key)) {
-      // 如果命令本身已经包含分页控制，则不替换
-      if (trimmed.includes('--no-pager') || trimmed.includes('less') || trimmed.includes('more')) {
-        return cmd
-      }
-      return replacement
-    }
+// 计算属性
+const activeTab = computed(() => tabs.value.find(t => t.id === activeTabId.value) || null)
+
+// ==================== 辅助函数 ====================
+const setTerminalRef = (tabId: string, el: HTMLElement | null) => {
+  if (el) {
+    terminalRefs.value[tabId] = el
   }
-  
-  // 通用处理：为常用命令添加环境变量
-  if (/^\s*(cat|grep|awk|sed|find|ls|ps|df|du)\s/.test(trimmed)) {
-    // 这些命令通常不会进入分页，保持不变
-    return cmd
-  }
-  
-  return cmd
 }
 
-// 当前prompt前缀
-const promptPrefix = computed(() => {
-  if (!activeConnection.value) return '$'
-  return `${activeConnection.value.username}@${activeConnection.value.name}:~$`
+const hasTabForConnection = (connId: string) => {
+  return tabs.value.some(t => t.connectionId === connId)
+}
+
+const getTabCountForConnection = (connId: string) => {
+  return tabs.value.filter(t => t.connectionId === connId).length
+}
+
+const getTabIndexForConnection = (tab: TerminalTab) => {
+  const sameTabs = tabs.value.filter(t => t.connectionId === tab.connectionId)
+  return sameTabs.indexOf(tab) + 1
+}
+
+const getConnectionStatusClass = (connId: string) => {
+  // 找到该连接下状态最好的那个tab
+  const relatedTabs = tabs.value.filter(t => t.connectionId === connId)
+  const hasConnected = relatedTabs.some(t => t.connectionStatus === 'connected')
+  const hasConnecting = relatedTabs.some(t => t.connectionStatus === 'connecting')
+
+  if (hasConnected) return 'status-connected'
+  if (hasConnecting) return 'status-connecting'
+  return 'status-disconnected'
+}
+
+const getTabStatusClass = (tab: TerminalTab) => ({
+  'status-connected': tab.connectionStatus === 'connected',
+  'status-connecting': tab.connectionStatus === 'connecting',
+  'status-disconnected': tab.connectionStatus === 'disconnected',
 })
 
-// ==================== 命令识别（增强版） ====================
-const isCommand = (input: string): boolean => {
-  if (!input.trim()) return false
-  
-  const commandPatterns = [
-    /^(sudo\s+)?[a-z_][a-z0-9_-]*\s/i,  // 以常规命令开头
-    /^\.\//,  // ./script
-    /^\//,    // /usr/bin/xxx
-    /^~/,     // ~/script
-  ]
-  
-  const commandKeywords = [
-    'ls', 'cd', 'pwd', 'cat', 'echo', 'mkdir', 'rm', 'cp', 'mv', 'chmod', 'chown',
-    'apt', 'yum', 'dnf', 'npm', 'yarn', 'pnpm', 'pip', 'pip3',
-    'git', 'curl', 'wget', 'ssh', 'scp', 'rsync', 'tar', 'zip', 'unzip',
-    'grep', 'awk', 'sed', 'find', 'which', 'ps', 'top', 'kill', 'df', 'du', 'free',
-    'uname', 'whoami', 'id', 'su', 'sudo', 'systemctl', 'service',
-    'docker', 'kubectl', 'node', 'python', 'python3', 'java',
-    'make', 'gcc', 'vim', 'nano', 'less', 'head', 'tail', 'exit', 'clear',
-    'ping', 'ifconfig', 'ip', 'netstat', 'ss', 'dig', 'nslookup',
-    'export', 'source', 'alias', 'history', 'man',
-  ]
-  
-  const firstWord = input.trim().split(/\s+/)[0]?.toLowerCase() || ''
-  
-  // 检查是否包含中文（中文 = 自然语言）
-  if (/[\u4e00-\u9fff]/.test(input)) {
-    return false
+const getStatusTagType = (tab: TerminalTab) => {
+  switch (tab.connectionStatus) {
+    case 'connected': return 'success'
+    case 'connecting': return 'warning'
+    case 'disconnected': return 'danger'
+    default: return 'info'
   }
-  
-  return commandKeywords.includes(firstWord) || 
-         commandPatterns.some(p => p.test(input.trim()))
 }
 
-// ==================== 终端写入辅助函数 ====================
-// 已移至会话管理函数中
+const getStatusText = (tab: TerminalTab) => {
+  switch (tab.connectionStatus) {
+    case 'connected': return '已连接'
+    case 'connecting': return '连接中...'
+    case 'disconnected': return '已断开'
+    default: return '未知'
+  }
+}
 
-// 断开连接
-// 旧版本已删除，保留新版本在下方
+const formatWaitingTime = (tab: TerminalTab) => {
+  if (!tab.waitingStartTime) return ''
+  return `${Math.floor((Date.now() - tab.waitingStartTime) / 1000)}s`
+}
 
-// ==================== 连接管理 CRUD ====================
+const generateTabId = () => `tab-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+// ==================== 新标签菜单 ====================
+const toggleNewTabMenu = () => {
+  showNewTabMenu.value = !showNewTabMenu.value
+}
+
+// 点击外部关闭菜单
+const handleDocumentClick = (e: MouseEvent) => {
+  if (showNewTabMenu.value && newTabMenuRef.value && !newTabMenuRef.value.contains(e.target as Node)) {
+    showNewTabMenu.value = false
+  }
+}
+
+// ==================== 加载连接 ====================
 const loadConnections = async () => {
   loadingConnections.value = true
   try {
     const res = await http.get('/api/connections')
-    connections.value = res.data || res || []
+    // http 拦截器已经返回 response.data，所以 res 就是数据
+    // 但要兼容两种情况：拦截器解包和未解包
+    if (Array.isArray(res)) {
+      connections.value = res
+    } else if (res?.data && Array.isArray(res.data)) {
+      connections.value = res.data
+    } else {
+      connections.value = []
+    }
   } catch (e: any) {
     ElMessage.error('加载连接列表失败')
   } finally {
@@ -549,1127 +505,1279 @@ const loadConnections = async () => {
   }
 }
 
+// ==================== 连接CRUD ====================
 const openAddConnectionDialog = () => {
-  isEditing.value = false
-  connectionForm.value = {
+  editingConnection.value = null
+  Object.assign(connectionForm, {
     name: '', host: '', port: 22, username: 'root',
-    protocol: 'ssh', auth_method: 'password',
-    password: '', private_key: '', passphrase: '',
-    group_name: 'default', tags: '', description: ''
-  }
+    auth_method: 'password', password: '', private_key: '',
+    passphrase: '', description: '', tags: ''
+  })
   showConnectionDialog.value = true
 }
 
-const editConnection = (conn: any) => {
-  isEditing.value = true
-  connectionForm.value = { ...conn }
+const editConnection = (conn: ServerConnection) => {
+  editingConnection.value = conn
+  Object.assign(connectionForm, {
+    name: conn.name, host: conn.host, port: conn.port,
+    username: conn.username, auth_method: conn.auth_method || 'password',
+    password: '', private_key: '', passphrase: '',
+    description: conn.description || '', tags: conn.tags || ''
+  })
   showConnectionDialog.value = true
 }
 
 const saveConnection = async () => {
+  if (!connectionFormRef.value) return
+  await connectionFormRef.value.validate()
+  savingConnection.value = true
   try {
-    if (isEditing.value) {
-      await http.put(`/api/connections/${connectionForm.value.id}`, connectionForm.value)
-      ElMessage.success('更新成功')
+    const payload = { ...connectionForm }
+    if (editingConnection.value) {
+      await http.put(`/api/connections/${editingConnection.value.id}`, payload)
+      ElMessage.success('连接已更新')
     } else {
-      await http.post('/api/connections', connectionForm.value)
-      ElMessage.success('添加成功')
+      await http.post('/api/connections', payload)
+      ElMessage.success('连接已创建')
     }
     showConnectionDialog.value = false
-    loadConnections()
+    await loadConnections()
   } catch (e: any) {
-    ElMessage.error('保存失败: ' + (e.message || '未知错误'))
+    const detail = e?.response?.data?.detail || e?.data?.detail || '保存失败'
+    ElMessage.error(detail)
+  } finally {
+    savingConnection.value = false
   }
 }
 
-const deleteConnection = async (id: string) => {
+const deleteConnection = async (connId: string) => {
   try {
-    await ElMessageBox.confirm('确定删除此连接？', '确认')
-    await http.delete(`/api/connections/${id}`)
-    ElMessage.success('删除成功')
-    loadConnections()
-  } catch { /* cancelled */ }
+    await ElMessageBox.confirm('确定要删除此连接吗？关联的终端标签页也将关闭。', '确认删除', {
+      confirmButtonText: '删除', cancelButtonText: '取消', type: 'warning'
+    })
+    const relatedTabs = tabs.value.filter(t => t.connectionId === connId)
+    for (const tab of relatedTabs) {
+      await doCloseTab(tab.id, false)
+    }
+    await http.delete(`/api/connections/${connId}`)
+    ElMessage.success('连接已删除')
+    await loadConnections()
+  } catch (e: any) {
+    // 用户取消时 e === 'cancel'
+    if (e !== 'cancel' && e?.toString() !== 'cancel') {
+      ElMessage.error('删除失败')
+    }
+  }
 }
 
-// ==================== 会话延迟检测 ====================
-const startSessionLatencyCheck = (session: TerminalSession) => {
-  if (session.latencyTimer) clearInterval(session.latencyTimer)
-  session.latencyTimer = setInterval(() => {
-    if (session.socket && session.socket.readyState === WebSocket.OPEN) {
-      session.socket.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }))
+const testConnectionClick = async () => {
+  testingConnection.value = true
+  try {
+    await http.post('/api/connections/test', {
+      host: connectionForm.host,
+      port: connectionForm.port,
+      username: connectionForm.username,
+      password: connectionForm.password,
+      private_key: connectionForm.private_key,
+      auth_method: connectionForm.auth_method,
+    })
+    ElMessage.success('连接测试成功')
+  } catch (e: any) {
+    const detail = e?.response?.data?.detail || e?.data?.detail || '连接测试失败'
+    ElMessage.error(detail)
+  } finally {
+    testingConnection.value = false
+  }
+}
+
+// ==================== 终端标签操作 ====================
+const connectToServer = (conn: ServerConnection) => {
+  // 点击左侧连接列表项时的行为：
+  // 如果已有此连接的标签，切换到第一个
+  const existing = tabs.value.find(t => t.connectionId === conn.id)
+  if (existing) {
+    switchTab(existing.id)
+    return
+  }
+  // 否则新建标签
+  openNewTab(conn)
+}
+
+const openNewTab = async (conn: ServerConnection) => {
+  showNewTabMenu.value = false
+
+  const tabId = generateTabId()
+  const clientId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+  // 计算标签名（同连接多开时显示序号）
+  const sameCount = tabs.value.filter(t => t.connectionId === conn.id).length
+  const tabName = sameCount > 0 ? `${conn.name} #${sameCount + 1}` : conn.name
+
+  // 检查是否已经有相同连接的标签存在，如果有，则复用其会话ID
+  const existingTabWithSameConnection = tabs.value.find(t => t.connectionId === conn.id);
+  const existingSessionId = existingTabWithSameConnection?.currentSessionId || null;
+
+  const newTab: TerminalTab = {
+    id: tabId,
+    name: tabName,
+    connectionId: conn.id,
+    connection: conn,
+    terminal: null,
+    fitAddon: null,
+    ws: null,
+    clientId,
+    connectionStatus: 'connecting',
+    statusMessage: '正在初始化...',
+    errorMessage: '',
+    wsLatency: 0,
+    agentMode: false,
+    isProcessingAI: false,
+    conversationHistory: [],
+    currentSessionId: existingSessionId, // 复用已有的会话ID
+    recentTerminalOutput: '',
+    aiSuggestedCommand: '',
+    lastAICommand: '',
+    showCommandConfirm: false,
+    userInputText: '',
+    isWaitingCommandFinish: false,
+    waitingStartTime: 0,
+    waitingTimer: null,
+    interactiveState: null,
+    interactiveHint: { message: '', actions: [] },
+    isManualCommand: false,
+  }
+
+  tabs.value.push(newTab)
+  activeTabId.value = tabId
+
+  await nextTick()
+  // 等两帧确保DOM完全渲染
+  await nextTick()
+
+  initTerminalForTab(newTab)
+  connectWebSocket(newTab)
+}
+
+const switchTab = (tabId: string) => {
+  activeTabId.value = tabId
+  nextTick(() => {
+    const tab = tabs.value.find(t => t.id === tabId)
+    if (tab?.fitAddon && tab.terminal) {
+      try {
+        tab.fitAddon.fit()
+      } catch { /* ignore */ }
+    }
+  })
+}
+
+const closeTab = async (tabId: string) => {
+  const tab = tabs.value.find(t => t.id === tabId)
+  if (!tab) return
+
+  if (tab.connectionStatus === 'connected') {
+    try {
+      await ElMessageBox.confirm(
+        `确定断开与 ${tab.name} 的连接？`,
+        '断开连接',
+        { confirmButtonText: '断开', cancelButtonText: '取消', type: 'warning' }
+      )
+    } catch {
+      return
+    }
+  }
+
+  await doCloseTab(tabId, true)
+}
+
+const doCloseTab = async (tabId: string, switchToNext: boolean) => {
+  const idx = tabs.value.findIndex(t => t.id === tabId)
+  if (idx === -1) return
+
+  const tab = tabs.value[idx]
+  
+  // 【新增】关闭标签页前，如果还有活跃会话，强制结束
+  if (tab.currentSessionId) {
+    await endChatSession(tab);
+  }
+  
+  cleanupTab(tab)
+  tabs.value.splice(idx, 1)
+  delete terminalRefs.value[tabId]
+
+  // 清理心跳定时器
+  const timer = tabLatencyTimers.get(tabId)
+  if (timer) {
+    clearInterval(timer)
+    tabLatencyTimers.delete(tabId)
+  }
+
+  if (switchToNext && activeTabId.value === tabId) {
+    if (tabs.value.length > 0) {
+      const newIdx = Math.min(idx, tabs.value.length - 1)
+      activeTabId.value = tabs.value[newIdx].id
+      nextTick(() => {
+        const nt = tabs.value[newIdx]
+        if (nt?.fitAddon) {
+          try { nt.fitAddon.fit() } catch { /* ignore */ }
+        }
+      })
+    } else {
+      activeTabId.value = null
+    }
+  }
+
+  // 更新同连接的其它标签名序号
+  updateTabNamesForConnection(tab.connectionId)
+}
+
+const updateTabNamesForConnection = (connId: string) => {
+  const sameTabs = tabs.value.filter(t => t.connectionId === connId)
+  const conn = connections.value.find(c => c.id === connId)
+  if (!conn) return
+
+  if (sameTabs.length === 1) {
+    sameTabs[0].name = conn.name
+  } else {
+    sameTabs.forEach((t, i) => {
+      t.name = `${conn.name} #${i + 1}`
+    })
+  }
+}
+
+const cleanupTab = (tab: TerminalTab) => {
+  if (tab.ws) {
+    try {
+      if (tab.ws.readyState === WebSocket.OPEN) {
+        tab.ws.send(JSON.stringify({ type: 'disconnect' }))
+      }
+      tab.ws.close()
+    } catch { /* ignore */ }
+    tab.ws = null
+  }
+
+  if (tab.waitingTimer) {
+    clearInterval(tab.waitingTimer)
+    tab.waitingTimer = null
+  }
+
+  if (tab.terminal) {
+    tab.terminal.dispose()
+    tab.terminal = null
+  }
+
+  tab.fitAddon = null
+  tab.connectionStatus = 'disconnected'
+}
+
+// ==================== 重连 ====================
+const reconnectTab = async (tab: TerminalTab) => {
+  cleanupTab(tab)
+  tab.connectionStatus = 'connecting'
+  tab.statusMessage = '正在重连...'
+  tab.errorMessage = ''
+  tab.clientId = `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+
+  await nextTick()
+  initTerminalForTab(tab)
+  connectWebSocket(tab)
+}
+
+// ==================== 终端初始化 ====================
+const initTerminalForTab = (tab: TerminalTab) => {
+  const container = terminalRefs.value[tab.id]
+  if (!container) {
+    console.error('Terminal container not found for tab:', tab.id)
+    tab.errorMessage = '终端容器未找到，请刷新页面'
+    tab.connectionStatus = 'disconnected'
+    return
+  }
+
+  if (tab.terminal) {
+    tab.terminal.dispose()
+  }
+
+  const term = new Terminal({
+    cursorBlink: true,
+    fontSize: 14,
+    fontFamily: 'Consolas, Monaco, "Courier New", monospace',
+    rows: 30,
+    cols: 120,
+    scrollback: 5000,
+    theme: {
+      background: '#1e1e1e',
+      foreground: '#d4d4d4',
+      cursor: '#d4d4d4',
+      selectionBackground: '#264f78',
+    }
+  })
+
+  const fitAddon = new FitAddon()
+  term.loadAddon(fitAddon)
+  term.loadAddon(new WebLinksAddon())
+
+  term.open(container)
+
+  try {
+    fitAddon.fit()
+  } catch { /* ignore first fit */ }
+
+  // Shell模式输入处理（包括Tab键补全）
+  term.onData((data: string) => {
+    // Shell模式下所有输入直接发给后端
+    if (!tab.agentMode && tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+      tab.ws.send(JSON.stringify({ type: 'data', data }))
+    }
+  })
+
+  // 二进制数据处理
+  term.onBinary((data: string) => {
+    if (!tab.agentMode && tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+      tab.ws.send(JSON.stringify({ type: 'data', data }))
+    }
+  })
+
+  tab.terminal = term
+  tab.fitAddon = fitAddon
+}
+
+// ==================== WebSocket ====================
+const connectWebSocket = (tab: TerminalTab) => {
+  const token = sessionStorage.getItem('token') || sessionStorage.getItem('access_token')
+  if (!token) {
+    ElMessage.error('请先登录')
+    tab.connectionStatus = 'disconnected'
+    tab.errorMessage = '未登录'
+    return
+  }
+
+  const proto = window.location.protocol === 'https:' ? 'wss' : 'ws'
+  const backendHost = window.location.host
+  const wsUrl = `${proto}://${backendHost}/api/ws/terminal?client_id=${tab.clientId}&token=${token}`
+
+  console.log(`[${tab.id}] Connecting WebSocket: ${wsUrl.replace(token, '***')}`)
+  tab.statusMessage = '正在建立WebSocket连接...'
+
+  try {
+    tab.ws = new WebSocket(wsUrl)
+  } catch (e) {
+    console.error('WebSocket creation failed:', e)
+    tab.connectionStatus = 'disconnected'
+    tab.errorMessage = 'WebSocket创建失败'
+    return
+  }
+
+  tab.ws.onopen = () => {
+    console.log(`[${tab.id}] WebSocket opened, sending connect request`)
+    tab.statusMessage = 'WebSocket已连接，正在SSH连接...'
+
+    tab.ws!.send(JSON.stringify({
+      type: 'connect',
+      connection_id: tab.connectionId
+    }))
+
+    startTabLatencyCheck(tab)
+  }
+
+  tab.ws.onmessage = (event) => {
+    handleTabWsMessage(tab, event)
+  }
+
+  tab.ws.onclose = (event) => {
+    console.log(`[${tab.id}] WebSocket closed, code=${event.code}, reason=${event.reason}`)
+    if (tab.connectionStatus !== 'disconnected') {
+      tab.connectionStatus = 'disconnected'
+      tab.errorMessage = `WebSocket关闭 (${event.code})`
+      tab.terminal?.writeln('\r\n\x1b[31m[WebSocket连接已关闭]\x1b[0m')
+      if (tab.isWaitingCommandFinish) stopTabWaiting(tab)
+    }
+  }
+
+  tab.ws.onerror = (event) => {
+    console.error(`[${tab.id}] WebSocket error:`, event)
+    tab.connectionStatus = 'disconnected'
+    tab.errorMessage = 'WebSocket连接错误'
+    tab.terminal?.writeln('\r\n\x1b[31m[WebSocket连接错误]\x1b[0m')
+  }
+}
+
+// ==================== 消息处理 ====================
+const handleTabWsMessage = async (tab: TerminalTab, event: MessageEvent) => {
+  try {
+    const msg = JSON.parse(event.data)
+    console.log('[WS]', tab.id, msg.type, msg.detection || '', msg)
+
+    switch (msg.type) {
+      case 'output':
+        tab.terminal?.write(msg.data || '')
+        tab.recentTerminalOutput += msg.data || ''
+        if (tab.recentTerminalOutput.length > 10000) {
+          tab.recentTerminalOutput = tab.recentTerminalOutput.slice(-8000)
+        }
+        break
+
+      case 'connected':
+        tab.connectionStatus = 'connected'
+        tab.statusMessage = ''
+        tab.errorMessage = ''
+        tab.terminal?.writeln(`\x1b[32m[${msg.content || '已连接'}]\x1b[0m`)
+        
+        // 【新增】连接成功，立即创建会话（开始计时）
+        await createChatSession(tab);
+
+        // 同步终端尺寸
+        nextTick(() => {
+          if (tab.fitAddon && tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+            try {
+              tab.fitAddon.fit()
+              const dims = tab.fitAddon.proposeDimensions()
+              if (dims) {
+                tab.ws.send(JSON.stringify({
+                  type: 'resize', cols: dims.cols, rows: dims.rows
+                }))
+              }
+            } catch { /* ignore */ }
+          }
+        })
+        break
+
+      case 'status':
+        tab.statusMessage = msg.content || ''
+        tab.terminal?.writeln(`\x1b[90m[${msg.content || ''}]\x1b[0m`)
+        break
+
+      case 'pong':
+        if (msg.timestamp) tab.wsLatency = Math.max(0, Date.now() - msg.timestamp)
+        break
+
+      case 'interactive_detected':
+        tab.interactiveState = msg.interactive_type || null
+        tab.interactiveHint = msg.hint || { message: '', actions: [] }
+        break
+
+      case 'command_finished':
+        // 无条件收口，避免卡等待
+        stopTabWaiting(tab)
+        tab.interactiveState = null
+        tab.interactiveHint = { message: '', actions: [] }
+
+        // 通知后端停监视（幂等）
+        if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+          tab.ws.send(JSON.stringify({ type: 'stop_watch' }))
+        }
+
+        await onTabCommandFinished(tab, msg.output || '')
+        break
+
+      case 'connection_lost':
+        tab.connectionStatus = 'disconnected'
+        tab.errorMessage = msg.content || '连接丢失'
+        tab.terminal?.writeln(`\r\n\x1b[31m[${msg.content || '连接丢失'}]\x1b[0m`)
+        stopTabWaiting(tab)
+        // 新增：连接丢失也算作结束
+        await endChatSession(tab)
+        if (msg.reconnectable) {
+          tab.terminal?.writeln('\x1b[33m[可点击"重连"按钮恢复连接]\x1b[0m')
+        }
+        break
+
+      case 'status_report':
+        if (!msg.ssh_alive && tab.connectionStatus === 'connected') {
+          tab.connectionStatus = 'disconnected'
+          tab.errorMessage = 'SSH连接已失效'
+          tab.terminal?.writeln('\r\n\x1b[31m[SSH连接已失效]\x1b[0m')
+          stopTabWaiting(tab)
+        }
+        break
+
+      case 'error':
+        tab.errorMessage = msg.content || '未知错误'
+        tab.terminal?.writeln(`\r\n\x1b[31m[错误: ${tab.errorMessage}]\x1b[0m`)
+        if (tab.connectionStatus === 'connecting') tab.connectionStatus = 'disconnected'
+        break
+
+      case 'disconnected':
+        tab.connectionStatus = 'disconnected'
+        tab.terminal?.writeln('\r\n\x1b[31m[SSH会话结束]\x1b[0m')
+        stopTabWaiting(tab)
+        // 新增：结束会话记录时长
+        await endChatSession(tab)
+        break
+    }
+  } catch {
+    // 非 JSON 直接作为终端输出
+    tab.terminal?.write(event.data)
+  }
+}
+
+// ==================== 心跳 ====================
+const tabLatencyTimers = new Map<string, ReturnType<typeof setInterval>>()
+
+const startTabLatencyCheck = (tab: TerminalTab) => {
+  const oldTimer = tabLatencyTimers.get(tab.id)
+  if (oldTimer) clearInterval(oldTimer)
+
+  const timer = setInterval(() => {
+    if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+      tab.ws.send(JSON.stringify({ type: 'ping', timestamp: Date.now() }))
+    } else {
+      clearInterval(timer)
+      tabLatencyTimers.delete(tab.id)
     }
   }, 5000)
+
+  tabLatencyTimers.set(tab.id, timer)
 }
 
-// ==================== 断开会话连接 ====================
-const disconnectServer = async (sessionId?: string) => {
-  if (sessionId) {
-    // 断开指定会话
-    const session = sessions.value.find(s => s.id === sessionId)
-    if (!session) return
-
-    if (session.isWaitingCommandFinish) {
-      // 通知后端停止监视
-      if (session.socket && session.socket.readyState === WebSocket.OPEN) {
-        session.socket.send(JSON.stringify({ type: 'stop_watch' }))
-      }
-      if (session.waitingTimer) {
-        clearInterval(session.waitingTimer)
-        session.waitingTimer = null
-      }
-      session.isWaitingCommandFinish = false
-    }
-
-    // 完成对话会话
-    if (session.currentSessionId) {
-      try {
-        const token = localStorage.getItem('access_token')
-        if (token) {
-          await fetch(`/api/chat-history/sessions/${session.currentSessionId}`, {
-            method: 'PUT',
-            headers: {
-              'Content-Type': 'application/json',
-              'Authorization': `Bearer ${token}`
-            },
-            body: JSON.stringify({ status: 'completed' })
-          })
-        }
-      } catch (e) {
-        console.error('[ChatSession] Failed to complete:', e)
-      }
-      session.currentSessionId = null
-    }
-
-    if (session.socket) {
-      session.socket.send(JSON.stringify({ type: 'disconnect' }))
-      session.socket.close()
-      session.socket = null
-    }
-    if (session.terminal) {
-      try {
-        session.terminal.dispose()
-      } catch (e) {
-        console.warn('Terminal dispose error:', e)
-      }
-      session.terminal = null
-    }
-    session.fitAddon = null
-
-    // 清理AI状态
-    session.history = []
-    session.recentTerminalOutput = ''
-    session.aiSuggestedCommand = ''
-    session.lastAICommand = ''
-    session.showCommandConfirm = false
-    session.interactiveState = null
-
-    if (session.latencyTimer) { 
-      clearInterval(session.latencyTimer); 
-      session.latencyTimer = null 
-    }
-    if (session.waitingTimer) {
-      clearInterval(session.waitingTimer)
-      session.waitingTimer = null
-    }
-  } else {
-    // 兼容旧代码，断开所有会话
-    for (const session of sessions.value) {
-      await disconnectServer(session.id)
-    }
-  }
-}
-
-// ==================== 全局快捷键 ====================
-const handleGlobalKeydown = (e: KeyboardEvent) => {
-  // Ctrl+Shift+I 切换 Agent 模式
-  if (e.ctrlKey && e.shiftKey && e.key === 'I') {
-    e.preventDefault()
-    const session = activeSession.value
-    if (session) {
-      session.agentMode = !session.agentMode
-      ElMessage.info(session.agentMode ? 'Agent 模式已开启' : 'Agent 模式已关闭')
-    }
-  }
-}
-
-// ==================== 生命周期 ====================
-onMounted(() => {
-  loadConnections()
-  document.addEventListener('keydown', handleGlobalKeydown)
-})
-
-onUnmounted(() => {
-  // 移除全局监听器
-  document.removeEventListener('keydown', handleGlobalKeydown)
+// ==================== 命令等待 ====================
+const startTabWaiting = (tabParam: TerminalTab) => {
+  // 同样重新获取响应式对象
+  const tab = tabs.value.find(t => t.id === tabParam.id) || tabParam;
   
-  // 不要在这里调用 disconnectServer() 或 session.socket.close()
-  // 只有在 closeSession (主动点叉) 时才断开
-  console.log('离开工作台，保持后台连接')
-})
+  tab.isWaitingCommandFinish = true;
+  tab.waitingStartTime = Date.now();
+  
+  if (tab.waitingTimer) clearInterval(tab.waitingTimer);
+  
+  tab.waitingTimer = setInterval(() => {
+    // 强制触发 Vue 更新
+    tab.waitingStartTime = tab.waitingStartTime; // 触发响应式更新
+  }, 1000);
+}
 
-// ==================== 会话终端初始化 ====================
-/**
- * 初始化会话终端
- * @param session 终端会话对象
- * @param connection 连接信息
- */
-const initSessionTerminal = async (session: TerminalSession, connection: any) => {
+const stopTabWaiting = (tabParam: TerminalTab) => {
+  // 同样重新获取响应式对象
+  const tab = tabs.value.find(t => t.id === tabParam.id) || tabParam;
+  
+  tab.isWaitingCommandFinish = false;
+  tab.waitingStartTime = 0;
+  if (tab.waitingTimer) {
+    clearInterval(tab.waitingTimer);
+    tab.waitingTimer = null;
+  }
+  tab.interactiveState = null;
+  tab.interactiveHint = { message: '', actions: [] };
+}
+
+const forceStopWaiting = (tabParam: TerminalTab) => {
+  // 同样重新获取响应式对象
+  const tab = tabs.value.find(t => t.id === tabParam.id) || tabParam;
+  
+  if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+    tab.ws.send(JSON.stringify({ type: 'stop_watch' }));
+  }
+  stopTabWaiting(tab);
+  tab.lastAICommand = '';
+  ElMessage.info('已强制结束等待');
+  tab.terminal?.writeln('\x1b[90m[已强制结束命令等待]\x1b[0m');
+}
+
+// ==================== 交互式操作 ====================
+const sendInteractiveAction = (tab: TerminalTab, data: string) => {
+  if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+    tab.ws.send(JSON.stringify({ type: 'data', data }))
+  }
+}
+
+// ==================== 发送命令 ====================
+const sendTabCommand = (tab: TerminalTab, cmd: string) => {
+  if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+    tab.ws.send(JSON.stringify({ type: 'data', data: cmd + '\r' }))
+  }
+}
+
+// ==================== AI 相关 ====================
+const preprocessCommand = (cmd: string): string => {
+  for (const [pattern, replacement] of Object.entries(PAGEBOUND_COMMANDS)) {
+    if (cmd.trim().startsWith(pattern)) return replacement
+  }
+  return cmd
+}
+
+const isCommand = (input: string): boolean => {
+  // 检查是否包含中文字符，如果包含，更可能是自然语言
+  if (/[\u4e00-\u9fa5]/.test(input)) {
+    return false
+  }
+  
+  // 检查是否符合命令格式
+  const isExplicitCommand = /^[a-zA-Z0-9_\-\.\/]+(\s+[a-zA-Z0-9_\-\.\/]+)*$/.test(input.trim())
+  
+  // 检查常见命令前缀
+  const cmdPrefixes = ['ls', 'cd', 'cat', 'grep', 'find', 'sudo', 'apt', 'yum',
+    'docker', 'systemctl', 'service', 'ps', 'kill', 'top', 'df', 'du',
+    'mkdir', 'rm', 'cp', 'mv', 'chmod', 'chown', 'wget', 'curl',
+    'tar', 'unzip', 'ssh', 'scp', 'ping', 'ifconfig', 'ip', 'netstat',
+    'ss', 'iptables', 'ufw', 'vim', 'nano', 'echo', 'export', 'source',
+    'npm', 'node', 'python', 'pip', 'git', 'make', 'gcc']
+  const firstWord = input.trim().split(/\s+/)[0].toLowerCase()
+  
+  // 综合判断：命令格式匹配、路径前缀或常见命令前缀
+  return isExplicitCommand || input.trim().startsWith('/') || input.trim().startsWith('./') || cmdPrefixes.includes(firstWord)
+}
+
+// 辅助函数：解析 JWT Token 获取用户信息
+const getUsernameFromStorage = () => {
+  // 1. 优先尝试直接获取
+  let username = sessionStorage.getItem('username') || sessionStorage.getItem('user_name');
+  if (username) return username;
+
+  // 2. 尝试从 user 对象中获取 (很多前端框架习惯存一个 json 对象)
   try {
-    // 初始化终端
-    const terminal = new Terminal({
-      fontSize: 14,
-      fontFamily: 'Consolas, "Courier New", monospace',
-      theme: {
-        background: '#0d0d0d',
-        foreground: '#e0e0e0',
-      },
-      cursorBlink: true,
-      cursorStyle: 'underline',
-      scrollback: 10000,
-    });
-    
-    const fitAddon = new FitAddon();
-    terminal.loadAddon(fitAddon);
-    
-    // 附加到 DOM
-    const terminalElement = document.getElementById(`terminal-${session.id}`);
-    if (!terminalElement) {
-      throw new Error(`终端元素 #terminal-${session.id} 未找到`);
+    const userStr = sessionStorage.getItem('user') || sessionStorage.getItem('userInfo');
+    if (userStr) {
+      const userObj = JSON.parse(userStr);
+      if (userObj.username) return userObj.username;
+      if (userObj.name) return userObj.name;
     }
-    
-    terminal.open(terminalElement);
-    fitAddon.fit();
-    
-    // 初始化 WebSocket 连接
-    // 1. 获取基础 Host
-    const envHost = (import.meta.env.VITE_API_HOST as string) || '';
-    let proto = window.location.protocol === 'https:' ? 'wss' : 'ws';
-    let backendHost = window.location.host;
-    
-    if (envHost) {
-      const normalized = envHost.replace(/\/+$/, '');
-      if (/^https?:\/\//.test(normalized)) {
-        proto = normalized.startsWith('https://') ? 'wss' : 'ws';
-        backendHost = normalized.replace(/^https?:\/\//, '');
-      } else {
-        backendHost = normalized;
+  } catch (e) { /* ignore */ }
+
+  // 3. 【最稳妥】解析 Access Token (JWT)
+  try {
+    const token = sessionStorage.getItem('access_token') || sessionStorage.getItem('token');
+    if (token) {
+      // JWT 格式为 header.payload.signature，我们需要 payload (第2部分)
+      const payloadPart = token.split('.')[1];
+      if (payloadPart) {
+        // Base64 解码
+        const base64 = payloadPart.replace(/-/g, '+').replace(/_/g, '/');
+        const jsonPayload = decodeURIComponent(window.atob(base64).split('').map(function(c) {
+            return '%' + ('00' + c.charCodeAt(0).toString(16)).slice(-2);
+        }).join(''));
+        
+        const payload = JSON.parse(jsonPayload);
+        // 根据 terminal.py 的逻辑，username 存在 'sub' 字段中
+        if (payload.sub) return payload.sub;
+        if (payload.username) return payload.username;
       }
     }
-
-    // 2. 获取 Token (非常重要，否则后端会拒绝连接)
-    const token = localStorage.getItem('access_token') || '';
-
-    // 3. 构建 URL：恢复使用查询参数模式，保持与后端一致
-    // 注意：这里使用 session.id 作为 client_id
-    const wsUrl = `${proto}://${backendHost}/ws/terminal?client_id=${session.id}&token=${token}`;
-    
-    console.log('正在连接 WebSocket:', wsUrl);
-    const socket = new WebSocket(wsUrl);
-    
-    // WebSocket 回调
-    socket.onopen = () => {
-      session.status = 'connected';
-      console.log(`[Session ${session.id}] WebSocket 连接已建立`);
-      
-      // 发送连接信息
-      socket.send(JSON.stringify({
-        type: 'connect',
-        connection_id: connection.id,
-        session_id: session.id
-      }));
-      
-      // 启动延迟检测
-      startSessionLatencyCheck(session);
-    };
-    
-    socket.onmessage = (ev) => {
-      try {
-        const msg = JSON.parse(ev.data);
-        switch (msg.type) {
-          case 'output':  // 匹配后端 read_ssh_output 逻辑
-            if (msg.data) {
-              terminal.write(msg.data);
-              session.recentTerminalOutput += msg.data;
-              // 限制长度防止内存溢出
-              if (session.recentTerminalOutput.length > 5000) {
-                session.recentTerminalOutput = session.recentTerminalOutput.slice(-5000);
-              }
-            }
-            break;
-          case 'command_finished': // 匹配后端 monitor 逻辑
-            session.interactiveState = null;
-            onCommandFinished(session, msg.output || '');
-            break;
-          case 'interactive_detected':
-            session.interactiveState = msg.interactive_type;
-            session.interactiveHint = msg.hint || { message: '检测到交互式程序', actions: [] };
-            break;
-          case 'connected':
-            session.status = 'connected';
-            terminal.writeln(`\r\n\x1b[32m[已连接: ${msg.content} ]\x1b[0m\r\n`);
-            break;
-          case 'error':
-            terminal.writeln(`\r\n\x1b[31m[错误: ${msg.content} ]\x1b[0m`);
-            ElMessage.error(msg.content);
-            if (session.isWaitingCommandFinish) {
-              onCommandFinished(session, msg.content || '');
-            }
-            break;
-          case 'pong':
-            session.status = 'connected'; // 收到心跳，确认连接正常
-            session.wsLatency = Date.now() - (msg.timestamp || Date.now());
-            break;
-          case 'disconnected':
-            terminal.writeln(`\r\n\x1b[31m[SSH会话结束]\x1b[0m`);
-            session.status = 'disconnected';
-            break;
-          case 'ai_suggestion':
-            session.aiSuggestedCommand = msg.command;
-            session.showCommandConfirm = true;
-            break;
-        }
-      } catch {
-        // 非 JSON 格式直接输出
-        terminal.write(ev.data);
-      }
-    };
-    
-    socket.onclose = () => {
-      session.status = 'disconnected';
-      console.log(`[Session ${session.id}] WebSocket 连接已关闭`);
-    };
-    
-    socket.onerror = (error) => {
-      session.status = 'disconnected';
-      ElMessage.error(`${session.displayName} 连接错误`);
-      console.error(`[Session ${session.id}] WebSocket 错误:`, error);
-    };
-    
-    // 终端输入处理 (用户直接在黑框输入时)
-    terminal.onData((data) => {
-      if (socket.readyState === WebSocket.OPEN) {
-        socket.send(JSON.stringify({
-          type: 'data', // 必须改成 data，后端才认识
-          data: data,
-          session_id: session.id
-        }));
-      }
-    });
-    
-    // 调整大小处理
-    window.addEventListener('resize', () => {
-      fitAddon.fit();
-    });
-    
-    // 更新会话状态
-    session.terminal = terminal;
-    session.fitAddon = fitAddon;
-    session.socket = socket;
-    
   } catch (e) {
-    console.error('终端初始化失败:', e);
-    session.status = 'disconnected';
-    ElMessage.error(`终端初始化失败: ${(e as Error).message}`);
+    console.warn('解析 Token 获取用户名失败', e);
   }
-};
 
-/**
- * 处理用户输入提交 - 智能分流核心
- */
-const handleUserSubmit = async (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  const input = session.userInputText.trim();
-  if (!input) return;
-  session.userInputText = ''; // 清空输入框
+  return 'Unknown User';
+}
 
-  // 1. 终端回显（让用户知道自己发了什么）
-  session.terminal?.write(`\r\n\x1b[37;1m${session.promptPrefix}\x1b[0m ${input}`);
-  
-  // 2. 添加到历史记录
-  session.history.push({ role: 'user', content: input });
-
-  // 3. 智能判断：是命令还是自然语言？
-  const isExplicitCommand = /^[a-zA-Z0-9_\-\.\/]+(\s+[a-zA-Z0-9_\-\.\/]+)*$/.test(input) && !/[\u4e00-\u9fa5]/.test(input);
-  
-  // 4. 分流处理
-  if (isExplicitCommand) {
-    // 路径 A: 看起来像命令 (e.g. "ls -la", "cd /var/log")
-    // 直接发送给终端执行，不经过 AI，也不需要监视（除非你想让 AI 分析结果）
-    // 如果你希望 AI 分析所有命令的结果，这里调用 sendCommandToTerminal
-    // 如果只是普通执行，直接 socket.send
+const createChatSession = async (tab: TerminalTab) => {
+  try {
+    // 1. 获取当前登录用户名 (使用增强的获取逻辑)
+    const username = getUsernameFromStorage();
     
-    // 这里我们选择：直接执行，不打扰 AI
-    if (session.socket && session.socket.readyState === WebSocket.OPEN) {
-        session.socket.send(JSON.stringify({
-            type: 'data',
-            data: input + '\n',
-            session_id: session.id
-        }));
+    // 2. 生成标题: 用户名 - 终端名
+    const sessionTitle = `${username} - ${tab.name}`;
+    
+    // 3. 获取服务器IP
+    const serverIp = tab.connection.host;
+    
+    // 4. 调用创建接口
+    const resp = await http.post('/api/chat-history/sessions', {
+      connection_id: tab.connectionId,
+      title: sessionTitle,
+      host: serverIp,
+      username: username,
+      status: 'active'
+    });
+
+    const data = resp?.data || resp;
+    tab.currentSessionId = data?.id || null;
+    
+    console.log(`会话已创建: ${sessionTitle}, ID: ${tab.currentSessionId}`);
+  } catch (e: any) {
+    // 忽略 404 等错误，避免控制台刷屏
+    if (e?.response?.status !== 404) {
+      console.warn('创建会话失败:', e);
     }
-  } else {
-    // 路径 B: 自然语言 (e.g. "查看内存占用", "怎么解压这个文件")
-    // 发送给 AI，让 AI 建议命令
-    await processWithAI(session, input);
+    tab.currentSessionId = null;
   }
-};
+}
 
-/**
- * 用户确认执行 AI 建议的命令
- */
-const confirmExecute = async () => {
-  // 获取当前激活的 session
-  const session = sessions.value.find(s => s.id === activeSessionId.value);
-  if (!session || !session.aiSuggestedCommand) return;
-
-  const cmd = session.aiSuggestedCommand;
+// 新增：结束会话函数（计算时长）
+const endChatSession = async (tab: TerminalTab) => {
+  if (!tab.currentSessionId) return;
   
-  // 1. 关闭确认框
-  session.showCommandConfirm = false;
-  session.isEditingCommand = false;
+  const sessionId = tab.currentSessionId;
+  // 立即清空 ID 防止重复调用
+  tab.currentSessionId = null;
 
-  // 2. 发送命令并开启监视 (复用之前的 sendCommandToTerminal)
-  // 这里必须用 sendCommandToTerminal，因为我们需要后端在执行完后通知我们
-  sendCommandToTerminal(session, cmd);
-
-  // 3. 清空暂存
-  session.aiSuggestedCommand = '';
-};
-
-/**
- * 进入命令编辑模式
- * @param sessionId 会话ID
- */
-const enterEditMode = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  session.isEditingCommand = true;
-  session.editableCommand = session.aiSuggestedCommand;
-};
-
-/**
- * 确认编辑后的命令
- * @param sessionId 会话ID
- */
-const confirmEditedCommand = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  if (session.socket && session.socket.readyState === WebSocket.OPEN) {
-    session.socket.send(JSON.stringify({
-      type: 'execute_command',
-      command: session.editableCommand,
-      session_id: session.id
-    }));
-    session.showCommandConfirm = false;
-    session.isEditingCommand = false;
-    session.isWaitingCommandFinish = true;
-    session.waitingStartTime = Date.now();
-    session.waitingElapsed = 0;
-    
-    // 启动等待计时器
-    if (session.waitingTimer) {
-      clearInterval(session.waitingTimer);
-    }
-    session.waitingTimer = setInterval(() => {
-      session.waitingElapsed = Math.floor((Date.now() - session.waitingStartTime) / 1000);
-    }, 1000);
+  try {
+    // 调用更新接口，设置状态为 completed
+    // 后端会根据当前时间自动计算时长
+    await http.put(`/api/chat-history/sessions/${sessionId}`, {
+      status: 'completed'
+    });
+    console.log(`会话已结束 (ID: ${sessionId})`);
+  } catch (e) {
+    console.warn('结束会话失败:', e);
   }
-};
-
-/**
- * 取消编辑命令
- * @param sessionId 会话ID
- */
-const cancelEditCommand = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  session.isEditingCommand = false;
-  session.showCommandConfirm = false;
-};
-
-/**
- * 拒绝执行命令
- * @param sessionId 会话ID
- */
-const rejectCommand = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  session.showCommandConfirm = false;
-};
-
-/**
- * 执行 AI 建议的命令
- * @param sessionId 会话ID
- */
-const confirmAICommand = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  const cmd = session.aiSuggestedCommand;
-  if (!cmd) return;
-  
-  session.showCommandConfirm = false;
-  // 记录这是 AI 触发的命令，以便执行完后自动反馈
-  session.lastAICommand = cmd;
-  
-  // 发送给后端执行
-  sendCommandToTerminal(session, cmd);
-};
-
-/**
- * 封装统一的发送函数
- * @param session 终端会话对象
- * @param command 命令内容
- */
-const sendCommandToTerminal = (session: TerminalSession, command: string) => {
-  if (session.socket && session.socket.readyState === WebSocket.OPEN) {
-    // 1. 必须先开启监视模式
-    session.socket.send(JSON.stringify({ type: 'watch_command' }));
-    
-    // 2. 发送实际指令 (类型必须是 data)
-    session.socket.send(JSON.stringify({
-      type: 'data',
-      data: command + '\n',
-      session_id: session.id
-    }));
-
-    // 3. 进入等待状态，此时 UI 显示“命令执行中...”
-    session.isWaitingCommandFinish = true;
-    session.waitingStartTime = Date.now();
-    session.waitingElapsed = 0;
-    session.lastAICommand = command; // 记录这个命令，等会要喂给 AI
-    
-    // 启动等待计时器
-    if (session.waitingTimer) {
-      clearInterval(session.waitingTimer);
-    }
-    session.waitingTimer = setInterval(() => {
-      session.waitingElapsed = Math.floor((Date.now() - session.waitingStartTime) / 1000);
-    }, 1000);
-  }
-};
-
-/**
- * 发送交互输入
- * @param sessionId 会话ID
- * @param input 输入内容
- */
-const sendInteractiveInput = (sessionId: string, input: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  if (session.socket && session.socket.readyState === WebSocket.OPEN) {
-    session.socket.send(JSON.stringify({
-      type: 'interactive_input',
-      input: input,
-      session_id: session.id
-    }));
-    session.interactiveState = null;
-  }
-};
-
-/**
- * 发送自定义交互输入
- * @param sessionId 会话ID
- */
-const sendCustomInteractiveInput = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  const input = session.customInteractiveInput.trim();
-  if (input) {
-    sendInteractiveInput(sessionId, input);
-    session.customInteractiveInput = '';
-  }
-};
-
-/**
- * 发送 Ctrl+C
- * @param sessionId 会话ID
- */
-const sendCtrlC = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  sendInteractiveInput(sessionId, '\x03');
-};
-
-/**
- * 强制停止等待
- * @param sessionId 会话ID
- */
-const forceStopWaiting = (sessionId: string) => {
-  const session = sessions.value.find(s => s.id === sessionId);
-  if (!session) return;
-  
-  session.isWaitingCommandFinish = false;
-  if (session.waitingTimer) {
-    clearInterval(session.waitingTimer);
-    session.waitingTimer = null;
-  }
-};
+}
 
 /**
  * 保存聊天消息到后端
  * 修复：增加全局 try-catch，确保绝对不会抛出异常阻断主流程
- * @param messageData 消息对象
  */
-const saveChatMessage = async (messageData: any) => {
+const saveChatMessage = async (tab: TerminalTab, messageData: any) => {
   try {
-    const token = localStorage.getItem('access_token');
-    if (!token) return;
-    
-    // 获取当前会话ID
-    const session = activeSession.value;
-    if (!session || !session.currentSessionId) return;
-    
-    // 使用正确的接口路径：/api/chat-history/sessions/{session_id}/messages
-    await http.post(`/api/chat-history/sessions/${session.currentSessionId}/messages`, messageData, {
+    if (!tab.currentSessionId) return
+    const token = sessionStorage.getItem('access_token') || sessionStorage.getItem('token')
+    // 尝试发送请求，如果 404 会进入 catch
+    await http.post(`/api/chat-history/sessions/${tab.currentSessionId}/messages`, messageData, {
       headers: { 'Authorization': `Bearer ${token}` }
-    });
+    })
   } catch (error) {
     // 关键点：这里只打印警告，绝对不要 throw error
-    console.warn('非关键错误：保存聊天记录失败 (接口可能未就绪)，不影响 AI 运行。', error);
+    console.warn('非关键错误：保存聊天记录失败 (接口可能未就绪)，不影响 AI 运行。', error)
   }
 };
+
+const buildSystemPrompt = (tab: TerminalTab): string => {
+  const conn = tab.connection
+  return `你是一个专业的Linux服务器运维AI助手。
+
+服务器: ${conn.host} 用户: ${conn.username}
+
+最近输出:
+\`\`\`
+${tab.recentTerminalOutput.slice(-3000)}
+\`\`\`
+
+回复格式（严格JSON）：
+{"explanation":"中文解释","command":"shell命令","needs_more_info":false}
+
+规则：每次只返回一条命令，不用sleep，不串联命令，避免交互式模式。任务完成时command为空字符串。`
+}
 
 /**
  * 解码Unicode转义字符
  */
 const decodeUnicode = (str: string): string => {
   try {
-    // 先将字符串作为JSON解析，这样会自动解码Unicode转义字符
     return JSON.parse(`"${str}"`);
   } catch {
-    // 如果解析失败，返回原字符串
     return str;
   }
 };
 
 /**
- * 解析AI响应（JSON格式）
+ * 处理特殊格式的AI响应
  */
-const parseAIResponse = (content: string): { explanation: string, command: string, needs_more_info: boolean } => {
+const parseSpecialAIResponse = (content: string): string => {
   try {
-    // 首先尝试将整个content作为JSON解析
-    try {
-      const parsed = JSON.parse(content);
-      return {
-        explanation: decodeUnicode(parsed.explanation || ''),
-        command: decodeUnicode(parsed.command || ''),
-        needs_more_info: parsed.needs_more_info || false
-      };
-    } catch {
-      // 如果整个content不是有效的JSON，尝试提取JSON部分
-      const jsonMatch = content.match(/\{[\s\S]*\}/);
-      if (jsonMatch) {
-        const parsed = JSON.parse(jsonMatch[0]);
-        return {
-          explanation: decodeUnicode(parsed.explanation || ''),
-          command: decodeUnicode(parsed.command || ''),
-          needs_more_info: parsed.needs_more_info || false
-        };
-      }
+    const contentMatches = content.match(/\{"content":"[^"]*"\}/g);
+    if (contentMatches) {
+      return contentMatches.map(match => {
+        try {
+          const obj = JSON.parse(match);
+          return obj.content || '';
+        } catch {
+          return '';
+        }
+      }).join('');
     }
   } catch (e) {
-    console.error('解析AI响应失败:', e);
-    // JSON解析失败，尝试文本解析
+    console.error('解析特殊格式失败:', e);
   }
-  
-  // 回退：按行解析
-  const lines = content.split('\n').filter(l => l.trim());
-  const commandLine = lines.find(l => l.startsWith('command:') || l.startsWith('Command:'));
-  const explanationLines = lines.filter(l => !l.startsWith('command:') && !l.startsWith('Command:'));
-  
-  return {
-    explanation: decodeUnicode(explanationLines.join('\n')),
-    command: decodeUnicode(commandLine ? commandLine.replace(/^command:/i, '').trim() : ''),
-    needs_more_info: false
-  };
+  return content;
 };
 
-// ==================== 核心修复：AI 响应处理 ====================
-/**
- * 调用 AI 接口 - 修复流式 JSON 解析问题
- */
-const processWithAI = async (session: TerminalSession, input: string) => {
-  session.isProcessingAI = true;
-  
-  // 用于累积 AI 返回的完整字符串
-  let fullContent = '';
-  
+const parseAIResponse = (text: string): { explanation: string; command: string } => {
+  // 先尝试直接 JSON 解析
   try {
-    const token = localStorage.getItem('access_token');
-    
-    // 构造系统提示词
-    const connInfo = connections.value.find(c => c.id === session.connectionId);
-    const systemPrompt = `你是一个专业的Linux服务器运维助手。
-主机: ${connInfo?.host || '未知'}
-用户: ${connInfo?.username || '未知'}
-最近终端输出:
-\`\`\`
-${session.recentTerminalOutput.slice(-1000)}
-\`\`\`
-回复必须是严格的JSON格式，不要包含Markdown代码块标记: {"explanation": "你的解释...", "command": "ls -la"}`;
-
-    const response = await fetch('/api/llm/chat', {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'Authorization': `Bearer ${token}`
-      },
-      body: JSON.stringify({
-        prompt: input,
-        system_prompt: systemPrompt,
-        conversation_history: session.history
-      })
-    });
-
-    if (!response.ok) throw new Error(`AI 接口异常: ${response.status}`);
-
-    const reader = response.body!.getReader();
-    const decoder = new TextDecoder();
-    
-    // 显示 AI 正在思考的提示
-    session.terminal?.write(`\r\n\x1b[36m[AI]: 正在分析...\x1b[0m`);
-
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      
-      const chunk = decoder.decode(value);
-      const lines = chunk.split('\n');
-      
-      for (const line of lines) {
-        // 过滤 SSE 的 data: 前缀
-        if (line.trim().startsWith('data: ')) {
-          const contentStr = line.replace('data: ', '').trim();
-          if (contentStr === '[DONE]') break;
-          
-          try {
-            // 1. 解析 SSE 的包装层 (例如: {"content": "x"})
-            const jsonLine = JSON.parse(contentStr);
-            
-            // 2. 获取真正的文本片段 (兼容不同的后端返回格式)
-            // 根据你的截图，字段名应该是 content
-            const token = jsonLine.content || jsonLine.delta?.content || '';
-            
-            // 3. 拼接到总缓冲区
-            fullContent += token;
-            
-          } catch (e) {
-            // 忽略非 JSON 行
-          }
-        }
-      }
+    const json = JSON.parse(text.trim())
+    return {
+      explanation: decodeUnicode(json.explanation || json.message || ''),
+      command: decodeUnicode(json.command || json.cmd || '')
     }
-
-    // ========== 循环结束，此时 fullContent 应该是完整的 JSON 字符串 ==========
-    console.log('AI 返回的完整内容:', fullContent);
-
-    // 清除"正在分析..."的提示行 (将光标移回行首并清除该行)
-    session.terminal?.write('\r\x1b[K');
-
-    try {
-      // 4. 尝试解析最终的 JSON
-      // 有时候 AI 会包裹 ```json ... ```，需要清理一下
-      const cleanJson = fullContent.replace(/```json/g, '').replace(/```/g, '').trim();
-      const result = JSON.parse(cleanJson);
-      
-      // 5. 处理解释 (Explanation)
-      if (result.explanation) {
-        session.history.push({ role: 'assistant', content: result.explanation });
-        // 在终端漂亮地显示出来
-        session.terminal?.writeln(`\x1b[36m[AI]: ${result.explanation}\x1b[0m`);
-      }
-      
-      // 6. 处理命令 (Command)
-      if (result.command) {
-        session.lastAICommand = result.command;
-        session.aiSuggestedCommand = result.command;
-        session.showCommandConfirm = true; // 弹出确认框
-        
-        session.terminal?.writeln(`\r\n\x1b[33m[AI 建议]: ${result.command}\x1b[0m`);
-        session.terminal?.writeln(`\x1b[90m(请在下方确认或修改命令)\x1b[0m\r\n`);
-      } else {
-        // 如果 AI 没给命令，说明可能是纯问答
-        if (!result.explanation) {
-            // 如果 JSON 解析了但没内容，可能是格式不对，把原始内容打出来作为兜底
-            session.terminal?.writeln(`\x1b[36m[AI]: ${fullContent}\x1b[0m`);
-        }
-      }
-
-    } catch (parseError) {
-      console.error('JSON 解析失败，AI 可能返回了纯文本:', parseError);
-      // 兜底逻辑：如果解析 JSON 失败，就直接当成普通文本显示
-      session.history.push({ role: 'assistant', content: fullContent });
-      session.terminal?.writeln(`\x1b[36m[AI]: ${fullContent}\x1b[0m\r\n`);
-    }
-
-  } catch (e: any) {
-    console.error('AI Error:', e);
-    session.terminal?.writeln(`\r\n\x1b[31m[错误]: ${e.message}\x1b[0m`);
-  } finally {
-    session.isProcessingAI = false;
+  } catch {
+    // 尝试提取 JSON 块
   }
-};
+
+  // 尝试从文本中提取 JSON
+  const jsonMatch = text.match(/\{[\s\S]*?\}/)
+  if (jsonMatch) {
+    try {
+      const json = JSON.parse(jsonMatch[0])
+      return {
+        explanation: decodeUnicode(json.explanation || json.message || ''),
+        command: decodeUnicode(json.command || json.cmd || '')
+      }
+    } catch {
+      // fall through
+    }
+  }
+
+  // 尝试提取 ```代码块``` 中的命令
+  const codeMatch = text.match(/```(?:bash|sh|shell)?\s*\n?([\s\S]*?)\n?```/)
+  if (codeMatch) {
+    return {
+      explanation: decodeUnicode(text.replace(codeMatch[0], '').trim()),
+      command: decodeUnicode(codeMatch[1].trim())
+    }
+  }
+
+  // 纯文本回复
+  return { explanation: decodeUnicode(text.trim()), command: '' }
+}
+
+const processWithAI = async (tab: TerminalTab, input: string) => {
+  tab.isProcessingAI = true
+  tab.terminal?.writeln('\r\n\x1b[90m[AI处理中...]\x1b[0m')
+
+  try {
+    const messages = [
+      { role: 'system', content: buildSystemPrompt(tab) },
+      ...tab.conversationHistory.slice(-20)  // 限制历史长度
+    ]
+
+    const resp = await http.post('/api/chat/completions', {
+      messages,
+      model: 'default'
+    })
+
+    // 兼容拦截器解包：resp 可能是 response.data 或完整 response
+    const data = resp?.data || resp
+    const aiText = data?.choices?.[0]?.message?.content || ''
+
+    if (!aiText) {
+      tab.terminal?.writeln('\r\n\x1b[31m[AI返回为空]\x1b[0m')
+      return
+    }
+
+    const parsed = parseAIResponse(aiText)
+
+    if (parsed.explanation) {
+      tab.terminal?.writeln(`\r\n\x1b[32m🤖 ${parsed.explanation}\x1b[0m`)
+    }
+
+    tab.conversationHistory.push({ role: 'assistant', content: aiText })
+
+    // 保存消息（容错）
+    saveChatMessage(tab, {
+      role: 'assistant',
+      content: parsed.explanation,
+      ai_explanation: parsed.explanation,
+      ai_suggested_command: parsed.command || undefined,
+      message_type: parsed.command ? 'command_suggest' : 'text'
+    })
+
+    if (parsed.command) {
+      const processedCmd = preprocessCommand(parsed.command)
+      tab.aiSuggestedCommand = processedCmd
+      tab.lastAICommand = processedCmd
+      tab.showCommandConfirm = true
+      tab.terminal?.writeln(`\r\n\x1b[33m┌─ AI建议命令 ────────────────────┐\x1b[0m`)
+      tab.terminal?.writeln(`\x1b[33m│ \x1b[97m${processedCmd}\x1b[33m\x1b[0m`)
+      tab.terminal?.writeln(`\x1b[33m└─────────────────────────────────┘\x1b[0m`)
+    } else {
+      tab.terminal?.writeln('\r\n\x1b[90m[AI分析完成，无需执行命令]\x1b[0m')
+    }
+  } catch (e: any) {
+    const errMsg = e?.response?.data?.detail || e?.message || '未知错误'
+    tab.terminal?.writeln(`\r\n\x1b[31m[AI错误: ${errMsg}]\x1b[0m`)
+
+    // 如果是 404，提示用户
+    if (e?.response?.status === 404) {
+      tab.terminal?.writeln('\x1b[31m[Chat API未配置，请检查后端 /api/chat/completions 路由]\x1b[0m')
+    }
+  } finally {
+    tab.isProcessingAI = false
+  }
+}
 
 /**
- * 命令执行完成回调 - 复刻老代码逻辑
- * @param sessionParam 终端会话对象
- * @param output 命令输出
+ * 命令执行完成回调 - 终极修复版
+ * 解决 UI 卡在 "等待命令执行完成" 的问题
  */
-const onCommandFinished = async (sessionParam: TerminalSession, output: string) => {
-  // 1. 【解决响应性丢失】重新从源头获取 session 对象
-  const session = sessions.value.find(s => s.id === sessionParam.id);
-  if (!session) return;
+const onTabCommandFinished = async (tabParam: TerminalTab, output: string) => {
+  // 1. 【核心修复】必须从响应式数组源头重新获取 tab 对象
+  // WebSocket 回调传进来的 tabParam 可能是非响应式的旧引用
+  const tab = tabs.value.find(t => t.id === tabParam.id);
+  
+  // 如果找不到（极端情况），回退使用传入的参数，但大概率 UI 不会更新
+  const targetTab = tab || tabParam;
 
-  console.log(`[Session ${session.id}] 命令执行完成`);
+  console.log(`[Tab ${targetTab.id}] 收到命令完成信号，开始处理状态流转`);
 
-  // 2. 【回归老代码逻辑】第一件事：无条件清除等待状态
-  // 无论后面发生什么，界面必须先恢复
-  session.isWaitingCommandFinish = false;
-  if (session.waitingTimer) {
-    clearInterval(session.waitingTimer);
-    session.waitingTimer = null;
+  // 2. 【强制清理】第一件事：立即关闭等待状态和计时器
+  // 无论后续逻辑如何，必须先让界面解锁
+  targetTab.isWaitingCommandFinish = false;
+  
+  if (targetTab.waitingTimer) {
+    clearInterval(targetTab.waitingTimer);
+    targetTab.waitingTimer = null;
   }
 
-  // 3. 更新输出
-  session.recentTerminalOutput = output || session.recentTerminalOutput;
-  const cmd = session.lastAICommand;
+  // 3. 更新输出缓冲区
+  targetTab.recentTerminalOutput = output || targetTab.recentTerminalOutput;
 
-  // 4. 【异步隔离】保存历史 (不使用 await，避免 404 阻塞)
+  const cmd = targetTab.lastAICommand;
+
+  // 4. 【异步保存】不使用 await，防止接口问题阻塞流程
   if (cmd) {
-    saveChatMessage({
+    saveChatMessage(targetTab, {
       role: 'output',
       content: output.slice(-4000),
       command: cmd,
+      command_output: output.slice(-4000),
       command_status: 'executed',
-      session_id: session.currentSessionId
+      message_type: 'output'
     }).catch(e => console.warn('历史保存失败(忽略)', e));
   }
 
-  // 5. 【状态切换】如果是 Agent 模式，开启 AI 状态
-  if (cmd && session.agentMode) {
-    // 立即开启 AI 状态，让用户看到"AI 正在分析..."
-    session.isProcessingAI = true;
+  // 5. 【核心逻辑修改】
+  // 只有 (有命令) && (是Agent模式) && (不是手动输入的命令) 才继续 AI 分析
+  if (cmd && targetTab.agentMode && !targetTab.isManualCommand) {
+    // 状态切换：确保 等待=false, AI处理=true
+    targetTab.isWaitingCommandFinish = false; // 双重保险
+    targetTab.isProcessingAI = true;
 
-    const resultMessage = `命令 \`${cmd}\` 已执行完成，输出如下：\n\`\`\`\n${output.slice(-2000)}\n\`\`\`\n请分析结果并决定下一步。`;
+    const resultMessage = `命令 \`${cmd}\` 已执行完成，输出如下：\n\`\`\`\n${output.slice(-2000)}\n\`\`\`\n请根据执行结果判断下一步操作。`;
     
-    // 添加用户消息到历史
-    session.history.push({ role: 'user', content: resultMessage });
+    // 添加到前端历史
+    targetTab.conversationHistory.push({ role: 'user', content: resultMessage });
 
-    // 调用 AI (这里内部有 try-catch，不会崩)
-    await processWithAI(session, resultMessage);
+    console.log('状态已切换，正在请求 AI 分析结果...');
+    
+    // 调用 AI (内部有 try-finally 确保 isProcessingAI 会关闭)
+    await processWithAI(targetTab, resultMessage);
     
     // 清理命令记录
-    session.lastAICommand = '';
+    targetTab.lastAICommand = '';
   } else {
-    // 普通模式，打印完成标记
-    session.terminal?.writeln('\r\n\x1b[90m[执行完成]\x1b[0m\r\n');
+    // 手动命令，或者 Shell 模式，到此为止
+    targetTab.terminal?.writeln('\r\n\x1b[90m[执行完成]\x1b[0m\r\n');
+    targetTab.lastAICommand = '';
+    // 重置标记，以防万一
+    targetTab.isManualCommand = false;
   }
 };
 
-/**
- * 处理服务器列表点击 (工作台左侧列表)
- */
-const handleServerClick = (connection: any) => {
-  // 查找是否已经打开了属于该 connection 的会话
-  const existingSession = sessions.value.find(s => s.connectionId === connection.id);
-  
-  if (existingSession) {
-    // 如果已打开，直接切换 activeId
-    activeSessionId.value = existingSession.id;
+// ==================== 确认/拒绝命令 ====================
+const confirmCommand = (tab: TerminalTab) => {
+  const cmd = (tab.aiSuggestedCommand || '').trim()
+  tab.showCommandConfirm = false
+  tab.aiSuggestedCommand = ''
+  if (!cmd) return
+
+  tab.lastAICommand = cmd
+  // 【关键新增】这是 AI 建议的命令，执行完需要回传给 AI 继续分析
+  tab.isManualCommand = false;
+
+  startTabWaiting(tab) // 先进入等待态
+
+  if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+    tab.ws.send(JSON.stringify({ type: 'watch_command' })) // 再开监视
+    tab.ws.send(JSON.stringify({ type: 'data', data: cmd + '\r' })) // 最后发命令
   } else {
-    // 没打开过，才执行新建
-    createNewSession(connection);
+    stopTabWaiting(tab)
+    tab.terminal?.writeln('\r\n\x1b[31m[连接未就绪，命令未发送]\x1b[0m')
   }
-};
+}
+
+const rejectCommand = (tab: TerminalTab) => {
+  tab.showCommandConfirm = false
+  tab.aiSuggestedCommand = ''
+  tab.lastAICommand = ''
+  tab.terminal?.writeln('\x1b[90m[已拒绝执行命令]\x1b[0m')
+}
 
 /**
- * 连接到服务器（保持兼容）
- * @param connection 连接信息
+ * 处理用户输入提交
+ * 修复：直接命令也必须先开启 watch_command，否则后端不会返回完成信号
  */
-const connectToServer = (connection: any) => {
-  // 调用新的处理函数
-  handleServerClick(connection);
-};
+const handleUserSubmit = async (tab: TerminalTab) => {
+  const input = tab.userInputText.trim()
+  if (!input) return
+  tab.userInputText = ''
 
-/**
- * 重新连接会话
- * @param session 终端会话对象
- */
-const reconnectSession = async (session: TerminalSession) => {
-  if (session.socket) {
-    session.socket.close();
+  // 1. Shell 模式：普通发送，不监视
+  if (!tab.agentMode) {
+    sendTabCommand(tab, input)
+    return
   }
-  const connection = connections.value.find(c => c.id === session.connectionId);
-  if (connection) {
-    await initSessionTerminal(session, connection);
-  }
-};
 
-// 侧边栏状态
-const sidebarCollapsed = ref(false)
+  // 2. Agent 模式：所有操作都要记录
+  tab.terminal?.writeln(`\r\n\x1b[36m❯ ${input}\x1b[0m`)
+  tab.conversationHistory.push({ role: 'user', content: input })
+
+  // 容错保存
+  saveChatMessage(tab, {
+    role: 'user',
+    content: input,
+    message_type: isCommand(input) ? 'command' : 'text'
+  }).catch(() => {})
+
+  // 3. 【核心修复】直接命令分支
+  if (isCommand(input)) {
+    const processedCmd = preprocessCommand(input)
+    tab.terminal?.writeln(`\x1b[90m[直接执行命令: ${processedCmd}]\x1b[0m`)
+    
+    // 记录这次是直接输入的命令
+    tab.lastAICommand = processedCmd
+    // 【关键新增】标记这是手动命令，执行完不要叫 AI 分析
+    tab.isManualCommand = true;
+    
+    // 开启等待 UI
+    startTabWaiting(tab)
+
+    // 发送组合拳：开启监视 -> 发送命令
+    if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+      // 关键！告诉后端我要监视这个命令
+      tab.ws.send(JSON.stringify({ type: 'watch_command' }))
+      // 发送实际命令
+      tab.ws.send(JSON.stringify({ type: 'data', data: processedCmd + '\r' }))
+    } else {
+      stopTabWaiting(tab)
+      tab.terminal?.writeln('\x1b[31m[连接已断开]\x1b[0m')
+    }
+    return
+  }
+
+  // 4. 自然语言分支：调用AI
+  if (!tab.currentSessionId) {
+    await createChatSession(tab)
+  }
+  await processWithAI(tab, input)
+}
+
+// ==================== 窗口resize ====================
+const handleResize = () => {
+  const tab = activeTab.value
+  if (tab?.fitAddon && tab.terminal) {
+    try {
+      tab.fitAddon.fit()
+      if (tab.ws && tab.ws.readyState === WebSocket.OPEN) {
+        const dims = tab.fitAddon.proposeDimensions()
+        if (dims) {
+          tab.ws.send(JSON.stringify({ type: 'resize', cols: dims.cols, rows: dims.rows }))
+        }
+      }
+    } catch { /* ignore */ }
+  }
+}
+
+// ==================== 生命周期 ====================
+onMounted(async () => {
+  await loadConnections()
+  window.addEventListener('resize', handleResize)
+  document.addEventListener('click', handleDocumentClick)
+})
+
+onBeforeUnmount(() => {
+  window.removeEventListener('resize', handleResize)
+  document.removeEventListener('click', handleDocumentClick)
+
+  for (const [, timer] of tabLatencyTimers) {
+    clearInterval(timer)
+  }
+  tabLatencyTimers.clear()
+
+  for (const tab of tabs.value) {
+    cleanupTab(tab)
+  }
+})
+
+// keep-alive 激活时重新 fit
+onActivated(() => {
+  nextTick(() => {
+    const tab = activeTab.value
+    if (tab?.fitAddon && tab.terminal) {
+      try { tab.fitAddon.fit() } catch { /* ignore */ }
+    }
+  })
+})
+
+onDeactivated(() => {
+  // keep-alive 停用时不清理连接
+})
+
+// 监听Agent模式切换
+watch(() => activeTab.value?.agentMode, (newVal) => {
+  const tab = activeTab.value
+  if (tab && newVal && !tab.currentSessionId && tab.connectionStatus === 'connected') {
+    createChatSession(tab)
+  }
+})
 </script>
 
-<style scoped lang="scss">
-// ==================== 现代工作台布局 ====================
+<style scoped>
 .workspace-container {
-  height: calc(100vh - 85px);
-  padding: 0;
-  max-width: none;
-}
-
-.workspace-layout {
   display: flex;
   height: 100%;
-  gap: 0;
-  background: #0f0f0f;
-}
-
-// ==================== 标签页样式 ====================
-.terminal-tabs {
-  display: flex;
-  background: #1a1a2e;
-  border-bottom: 1px solid #2a2a4a;
-  padding: 5px 10px 0;
-  gap: 4px;
-  overflow-x: auto;
-  flex-shrink: 0;
-
-  .tab-item {
-    display: flex;
-    align-items: center;
-    padding: 6px 15px;
-    background: #2a2a40;
-    color: #909399;
-    border-radius: 4px 4px 0 0;
-    cursor: pointer;
-    font-size: 13px;
-    transition: all 0.3s;
-    position: relative;
-    min-width: 120px;
-    white-space: nowrap;
-
-    &.active {
-      background: #0a0a0f;
-      color: #fff;
-    }
-
-    .status-dot {
-      width: 8px;
-      height: 8px;
-      border-radius: 50%;
-      margin-right: 8px;
-      flex-shrink: 0;
-      display: inline-block;
-      background: #909399; // 默认灰色
-      
-      &.connected {
-        background: #67c23a;
-        box-shadow: 0 0 5px #67c23a;
-      }
-      &.connecting {
-        background: #e6a23c;
-        animation: blink 1s infinite;
-      }
-      &.disconnected {
-        background: #f56c6c;
-      }
-    }
-
-    @keyframes blink {
-      50% { opacity: 0.5; }
-    }
-
-    .tab-name {
-      flex: 1;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    .close-icon {
-      margin-left: 8px;
-      border-radius: 50%;
-      padding: 2px;
-      flex-shrink: 0;
-      
-      &:hover {
-        background: rgba(255,255,255,0.2);
-      }
-    }
-  }
-}
-
-// ==================== 终端容器样式 ====================
-.terminal-container {
-  flex: 1;
-  position: relative;
   overflow: hidden;
-  display: flex;
-  flex-direction: column;
-  
-  .terminal-instance-wrapper {
-    height: 100%;
-    display: flex;
-    flex-direction: column;
-  }
+  background: #0d1117;
 }
 
-// ==================== 左侧边栏 ====================
-.connections-sidebar {
-  width: 280px;
-  min-width: 280px;
-  background: linear-gradient(180deg, #1a1a2e 0%, #16162a 100%);
-  border-right: 1px solid #2a2a4a;
+/* ========== 侧边栏 ========== */
+.sidebar {
+  width: 260px;
+  min-width: 260px;
+  background: #161b22;
+  border-right: 1px solid #30363d;
   display: flex;
   flex-direction: column;
-  transition: all 0.3s ease;
-  
-  &.collapsed {
-    width: 48px;
-    min-width: 48px;
-  }
+  overflow: hidden;
+  transition: width 0.3s ease, min-width 0.3s ease;
+}
+
+.sidebar.collapsed {
+  width: 60px;
+  min-width: 60px;
 }
 
 .sidebar-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   padding: 16px;
-  border-bottom: 1px solid #2a2a4a;
-  
-  h2 {
-    margin: 0;
-    font-size: 16px;
-    font-weight: 600;
-    color: #e0e0e0;
-  }
-  
-  .collapse-btn {
-    cursor: pointer;
-    color: #888;
-    font-size: 24px;
-    padding: 4px;
-    border-radius: 4px;
-    transition: all 0.2s;
-    
-    &:hover {
-      background: #2a2a4a;
-      color: #fff;
-    }
-  }
+  border-bottom: 1px solid #30363d;
+  min-height: 60px;
+  box-sizing: border-box;
 }
 
-.sidebar-content {
-  flex: 1;
-  overflow-y: auto;
-  padding: 12px;
+.sidebar.collapsed .sidebar-header {
+  min-height: 60px;
 }
 
-.add-connection-btn {
-  width: 100%;
-  margin-bottom: 16px;
-  background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-  border: none;
-  font-weight: 500;
-  
-  &:hover {
-    opacity: 0.9;
-  }
-  
-  .el-icon {
-    margin-right: 6px;
-  }
-}
-
-.connections-list {
+.sidebar-header-left {
   display: flex;
-  flex-direction: column;
+  align-items: center;
   gap: 8px;
 }
 
-.connection-item {
-  display: flex;
-  align-items: center;
-  gap: 10px;
-  padding: 12px;
-  background: rgba(255, 255, 255, 0.03);
-  border: 1px solid transparent;
-  border-radius: 8px;
-  cursor: pointer;
-  transition: all 0.2s ease;
-  position: relative;
-  
-  &:hover {
-    background: rgba(255, 255, 255, 0.06);
-    border-color: #3a3a5a;
-    
-    .conn-actions {
-      opacity: 1;
-    }
-  }
-  
-  &.active {
-    background: linear-gradient(135deg, rgba(102, 126, 234, 0.2) 0%, rgba(118, 75, 162, 0.2) 100%);
-    border-color: #667eea;
-    
-    .conn-icon {
-      background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-      color: #fff;
-    }
-  }
+.sidebar-header h3 {
+  margin: 0;
+  color: #e6edf3;
+  font-size: 16px;
+  transition: opacity 0.3s ease;
 }
 
-.conn-icon {
-  width: 40px;
-  height: 40px;
-  border-radius: 10px;
-  background: #2a2a4a;
+.sidebar.collapsed .sidebar-header h3 {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+}
+
+.sidebar.collapsed .sidebar-header .el-button:not(.sidebar-toggle) {
+  opacity: 0;
+  width: 0;
+  overflow: hidden;
+  padding: 0;
+  margin: 0;
+  border: none;
+}
+
+.sidebar.collapsed .sidebar-header {
+  justify-content: center;
+}
+
+.sidebar-toggle {
+  color: #8b949e;
+  transition: all 0.2s ease;
+  padding: 8px;
+  border-radius: 4px;
   display: flex;
   align-items: center;
   justify-content: center;
-  color: #888;
-  min-width: 40px;
-  min-height: 40px;
+}
 
-  // 关键修复：穿透 scoped 强制设置 el-icon 和内部 svg 的尺寸
-  :deep(.el-icon) {
-    font-size: 24px !important;
-    width: 24px;
-    height: 24px;
+.sidebar-toggle:hover {
+  color: #e6edf3;
+  background: #21262d;
+}
 
-    svg {
-      width: 24px !important;
-      height: 24px !important;
-    }
-  }
+.sidebar-toggle.collapsed {
+  transform: rotate(180deg);
+}
+
+.sidebar.collapsed .sidebar-toggle {
+  padding: 12px !important;
+  font-size: 18px !important;
+  width: 40px !important;
+  height: 40px !important;
+  display: flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+}
+
+.sidebar.collapsed .sidebar-toggle .el-icon svg {
+  width: 20px !important;
+  height: 20px !important;
+  fill: currentColor !important;
+}
+
+/* 确保侧边栏头部在收缩前后高度一致 */
+.sidebar-header {
+  height: 60px !important;
+  min-height: 60px !important;
+  display: flex !important;
+  align-items: center !important;
+  box-sizing: border-box !important;
+}
+
+.sidebar.collapsed .sidebar-header {
+  height: 60px !important;
+  min-height: 60px !important;
+  justify-content: center !important;
+  align-items: center !important;
+}
+
+.connections-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+}
+
+.conn-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  transition: background 0.2s;
+  margin-bottom: 4px;
+  position: relative;
+}
+
+.conn-item:hover {
+  background: #21262d;
+}
+
+.conn-item.active {
+  background: #1f6feb22;
+  border: 1px solid #1f6feb44;
 }
 
 .conn-info {
+  display: flex;
+  align-items: center;
   flex: 1;
   min-width: 0;
 }
 
+.conn-icon {
+  color: #8b949e;
+  font-size: 24px;
+  margin-right: 10px;
+  flex-shrink: 0;
+}
+
+.conn-details {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+}
+
 .conn-name {
+  color: #e6edf3;
   font-size: 14px;
   font-weight: 500;
-  color: #e0e0e0;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
 .conn-host {
+  color: #8b949e;
   font-size: 12px;
-  color: #666;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
@@ -1677,136 +1785,255 @@ const sidebarCollapsed = ref(false)
 
 .conn-actions {
   display: flex;
-  gap: 10px;
+  gap: 4px;
   opacity: 0;
   transition: opacity 0.2s;
+}
 
-  :deep(.el-icon) {
-    padding: 6px;
-    border-radius: 6px;
-    cursor: pointer;
-    color: #888;
-    font-size: 24px;
-    width: 24px;
-    height: 24px;
+.conn-item:hover .conn-actions {
+  opacity: 1;
+}
 
-    svg {
-      width: 24px !important;
-      height: 24px !important;
-    }
+.action-icon {
+  color: #8b949e;
+  cursor: pointer;
+  font-size: 14px;
+  padding: 2px;
+  border-radius: 3px;
+  transition: all 0.2s;
+}
 
-    &:hover {
-      background: #3a3a5a;
-      color: #fff;
-    }
+.action-icon:hover {
+  color: #58a6ff;
+  background: #ffffff11;
+}
 
-    &.delete-icon:hover {
-      color: #f56c6c;
-    }
-  }
+.action-icon.add-icon:hover {
+  color: #3fb950;
+}
+
+.action-icon.delete-icon:hover {
+  color: #f85149;
 }
 
 .conn-status {
   position: absolute;
-  top: 8px;
-  right: 8px;
-  
-  .status-dot {
-    display: block;
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    background: #67c23a;
-    animation: pulse 2s infinite;
-  }
+  right: 12px;
+  top: 50%;
+  transform: translateY(-50%);
+}
+
+.status-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #8b949e;
+}
+
+.status-dot.status-connected, .tab-status-dot.status-connected {
+  background: #3fb950;
+  box-shadow: 0 0 6px #3fb95066;
+}
+
+.status-dot.status-connecting, .tab-status-dot.status-connecting {
+  background: #d29922;
+  animation: pulse 1s infinite;
+}
+
+.status-dot.status-disconnected, .tab-status-dot.status-disconnected {
+  background: #f85149;
 }
 
 @keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.5; }
+  50% { opacity: 0.4; }
 }
 
-// ==================== 主终端区 ====================
+/* ========== 主内容区 ========== */
 .terminal-main {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-width: 0;
-  background: #0a0a0f;
+  overflow: hidden;
 }
 
-// 欢迎面板
+/* 标签栏 */
+.terminal-tabs {
+  display: flex;
+  align-items: center;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  padding: 0 8px;
+  height: 38px;
+  overflow-x: auto;
+  position: relative;
+  flex-shrink: 0;
+}
+
+.terminal-tabs::-webkit-scrollbar {
+  height: 2px;
+}
+
+.tab-item {
+  display: flex;
+  align-items: center;
+  padding: 6px 12px;
+  cursor: pointer;
+  border-bottom: 2px solid transparent;
+  color: #8b949e;
+  font-size: 13px;
+  white-space: nowrap;
+  transition: all 0.2s;
+  gap: 6px;
+}
+
+.tab-item:hover {
+  color: #e6edf3;
+  background: #21262d;
+}
+
+.tab-item.active {
+  color: #e6edf3;
+  border-bottom-color: #1f6feb;
+}
+
+.tab-status-dot {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: #8b949e;
+  flex-shrink: 0;
+}
+
+.tab-index {
+  color: #6e7681;
+  font-size: 11px;
+}
+
+.tab-close {
+  font-size: 12px;
+  opacity: 0;
+  transition: opacity 0.2s;
+  cursor: pointer;
+  border-radius: 2px;
+  padding: 1px;
+}
+
+.tab-item:hover .tab-close {
+  opacity: 0.7;
+}
+
+.tab-close:hover {
+  opacity: 1 !important;
+  background: #ffffff22;
+}
+
+.tab-add {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 28px;
+  height: 28px;
+  cursor: pointer;
+  color: #8b949e;
+  border-radius: 4px;
+  transition: all 0.2s;
+  flex-shrink: 0;
+}
+
+.tab-add:hover {
+  color: #e6edf3;
+  background: #21262d;
+}
+
+.new-tab-menu {
+  position: absolute;
+  top: 100%;
+  right: 8px;
+  background: #21262d;
+  border: 1px solid #30363d;
+  border-radius: 6px;
+  padding: 4px;
+  z-index: 100;
+  min-width: 220px;
+  max-height: 300px;
+  overflow-y: auto;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+}
+
+.menu-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  cursor: pointer;
+  border-radius: 4px;
+  color: #e6edf3;
+  font-size: 13px;
+  transition: background 0.2s;
+}
+
+.menu-item:hover {
+  background: #30363d;
+}
+
+/* 欢迎页 */
 .welcome-panel {
   flex: 1;
   display: flex;
   align-items: center;
   justify-content: center;
-  background: radial-gradient(ellipse at center, #1a1a2e 0%, #0a0a0f 100%);
 }
 
 .welcome-content {
   text-align: center;
-  padding: 40px;
-  
-  .welcome-icon {
-    font-size: 72px;
-    color: #3a3a5a;
-    margin-bottom: 24px;
-  }
-  
-  h2 {
-    font-size: 28px;
-    font-weight: 300;
-    color: #e0e0e0;
-    margin: 0 0 12px 0;
-  }
-  
-  p {
-    font-size: 14px;
-    color: #666;
-    margin: 0 0 32px 0;
-    max-width: 320px;
-  }
-  
-  .el-button {
-    background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-    border: none;
-    padding: 12px 32px;
-    font-size: 15px;
-    
-    .el-icon {
-      margin-right: 8px;
-    }
-  }
+  color: #8b949e;
 }
 
-// 终端面板
+.welcome-icon {
+  font-size: 64px;
+  color: #30363d;
+  margin-bottom: 16px;
+}
+
+.welcome-content h2 {
+  color: #e6edf3;
+  margin: 8px 0;
+}
+
+.welcome-content p {
+  margin-bottom: 24px;
+}
+
+/* 终端面板 */
 .terminal-panel {
   flex: 1;
   display: flex;
   flex-direction: column;
-  min-height: 0;
+  overflow: hidden;
 }
 
 .terminal-header {
   display: flex;
-  align-items: center;
   justify-content: space-between;
+  align-items: center;
   padding: 8px 16px;
-  background: #16162a;
-  border-bottom: 1px solid #2a2a4a;
+  background: #161b22;
+  border-bottom: 1px solid #30363d;
+  flex-shrink: 0;
 }
 
 .terminal-info {
   display: flex;
   align-items: center;
-  gap: 12px;
-  
-  .server-name {
-    font-size: 14px;
-    font-weight: 500;
-    color: #e0e0e0;
-  }
+  gap: 8px;
+}
+
+.server-name {
+  color: #e6edf3;
+  font-weight: 600;
 }
 
 .terminal-controls {
@@ -1815,160 +2042,102 @@ const sidebarCollapsed = ref(false)
   gap: 12px;
 }
 
-.terminal-wrapper {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  min-height: 0;
-  background: #0f0f0f;
-}
-
-.terminal {
-  flex: 1;
-  background: #0d0d0d !important;
-  border-radius: 0;
-  min-height: 400px;
-}
-
-/* Shell模式下的样式 */
-.shell-mode {
-  background: #16162a;
-  border-top: 1px solid #2a2a4a;
-  padding: 8px 12px;
-}
-
-/* 确保在shell模式下，终端占满屏幕 */
-.terminal-instance-wrapper {
-  height: 100%;
-  display: flex;
-  flex-direction: column;
-}
-
-.terminal-instance-wrapper > .terminal-header {
-  flex-shrink: 0;
-}
-
-.terminal-instance-wrapper > .terminal-wrapper {
-  flex: 1;
-}
-
-.terminal-instance-wrapper > .terminal-bottom-bar {
-  flex-shrink: 0;
-}
-
-.terminal-bottom-bar {
-  flex-shrink: 0;
-  background: #16162a;
-  border-top: 1px solid #2a2a4a;
-  padding: 8px 12px;
-}
-
-/* 交互式操作栏样式 */
-.interactive-bar {
-  padding: 10px 12px;
-  background: #2d2d30;
-  border-radius: 4px;
-  border: 1px solid #e6a23c;
-}
-
-.interactive-header {
+/* 状态提示条 */
+.status-banner {
   display: flex;
   align-items: center;
   gap: 8px;
-  margin-bottom: 10px;
-  color: #e6a23c;
-  font-size: 14px;
-}
-
-.interactive-message { flex: 1; }
-.interactive-elapsed { color: #999; font-size: 12px; }
-
-.interactive-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.interactive-actions .el-divider--vertical {
-  border-color: #555;
-  height: 20px;
-}
-
-.interactive-actions :deep(.el-input__wrapper) {
-  background: #1e1e1e;
-  border-color: #555;
-}
-
-.interactive-actions :deep(.el-input__inner) {
-  color: #d4d4d4;
-}
-
-/* 普通输入栏样式 */
-.input-area {
-  display: flex;
-  align-items: center;
-}
-
-.input-area :deep(.el-input__wrapper) {
-  background: #1e1e1e;
-  border-color: #3c3c3c;
-}
-
-.input-area :deep(.el-input__inner) {
-  color: #d4d4d4;
-}
-
-.prompt-prefix {
-  color: #6a9955;
-  font-family: 'Consolas', monospace;
+  padding: 8px 16px;
   font-size: 13px;
-  white-space: nowrap;
+  flex-shrink: 0;
 }
 
-/* 命令确认栏样式增强 */
-.command-confirm-bar {
-  margin-bottom: 8px;
-  padding: 10px 12px;
+.status-banner.connecting {
+  background: #d2992211;
+  color: #d29922;
+  border-bottom: 1px solid #d2992233;
+}
+
+.status-banner.error {
+  background: #f8514911;
+  color: #f85149;
+  border-bottom: 1px solid #f8514933;
+}
+
+.terminal-container {
+  flex: 1;
+  padding: 4px;
+  background: #1e1e1e;
+  overflow: hidden;
+  min-height: 200px;
+}
+
+.waiting-indicator {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 16px;
+  background: #1c2128;
+  border-top: 1px solid #30363d;
+  color: #d29922;
+  font-size: 13px;
+  flex-shrink: 0;
+}
+
+.rotating {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  100% { transform: rotate(360deg); }
+}
+
+.waiting-time {
+  color: #8b949e;
+  font-size: 12px;
+}
+
+.interactive-hint {
+  padding: 8px 16px;
+  background: #1c2128;
+  border-top: 1px solid #30363d;
+  flex-shrink: 0;
+}
+
+.hint-actions {
+  display: flex;
+  gap: 8px;
+  margin-top: 8px;
+}
+
+.command-confirm {
+  padding: 10px 16px;
   background: #2d2d30;
-  border-radius: 4px;
-  border: 1px solid #ffc107;
+  border-top: 1px solid #ffc107;
+  flex-shrink: 0;
   z-index: 1000;
   position: relative;
   box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
 }
 
-.confirm-label {
-  color: #ffc107;
-  font-size: 13px;
-  margin-bottom: 6px;
-}
-
-.confirm-command-wrapper {
+.confirm-header {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #d29922;
   margin-bottom: 8px;
 }
 
-.command-edit-input {
-  background: #1e1e1e !important;
-  border-color: #3c3c3c !important;
-}
-
-.command-edit-input :deep(.el-textarea__inner) {
-  color: #d4d4d4;
-  font-family: 'Consolas', monospace;
-  font-size: 14px;
-}
-
-.confirm-command-text {
-  display: block;
-  background: #1e1e1e;
+.confirm-command {
+  background: #0d1117;
   padding: 8px 12px;
   border-radius: 4px;
-  color: #4ec9b0;
-  font-family: 'Consolas', monospace;
-  font-size: 14px;
-  white-space: pre-wrap;
-  word-break: break-all;
+  margin-bottom: 8px;
+}
+
+.confirm-command code {
+  color: #7ee787;
+  font-family: Consolas, Monaco, monospace;
 }
 
 .confirm-actions {
@@ -1976,233 +2145,27 @@ const sidebarCollapsed = ref(false)
   gap: 8px;
 }
 
-.shortcut {
-  font-size: 11px;
-  opacity: 0.7;
-  margin-left: 4px;
+.input-bar {
+  padding: 8px 16px;
+  background: #161b22;
+  border-top: 1px solid #30363d;
+  flex-shrink: 0;
 }
 
-/* 等待提示样式 */
-.waiting-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 8px 12px;
-  background: #252526;
-  border-radius: 4px;
-  color: #d4d4d4;
-  font-size: 13px;
+::-webkit-scrollbar {
+  width: 6px;
 }
 
-.waiting-bar .is-loading {
-  animation: rotate 1s linear infinite;
-}
-
-// ==================== 保留原有样式兼容 ====================
-
-.workspace-header {
-  margin-bottom: 20px;
-  
-  h1 {
-    margin: 0;
-    font-size: 24px;
-  }
-  
-  p {
-    color: #666;
-    margin-top: 4px;
-  }
-}
-
-.workspace-content {
-  display: grid;
-  grid-template-columns: 1fr;
-  gap: 20px;
-}
-
-.connection-card {
-  margin-bottom: 20px;
-}
-
-.card-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.header-left {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.header-right {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-}
-
-.connection-name {
-  font-weight: bold;
-  font-size: 16px;
-}
-
-.mode-tag {
-  font-size: 12px;
-}
-
-/* 终端区域样式 */
-.terminal-card {
-  margin-bottom: 20px;
-}
-
-.terminal-wrapper {
-  display: flex;
-  flex-direction: column;
-}
-
-.terminal {
-  background: #1e1e1e;
-  border-radius: 4px 4px 0 0;
-  height: 500px;
-}
-
-/* ==================== 底部栏通用 ==================== */
-.terminal-bottom-bar {
-  background: #252526;
-  border: 1px solid #3c3c3c;
-  border-top: none;
-  border-radius: 0 0 4px 4px;
-  padding: 8px 12px;
-  min-height: 48px;
-}
-
-/* 普通输入区 */
-.input-area :deep(.el-input__wrapper) {
-  background: #1e1e1e;
-  border-color: #3c3c3c;
-}
-
-.input-area :deep(.el-input__inner) {
-  color: #d4d4d4;
-}
-
-.prompt-prefix {
-  color: #6a9955;
-  font-family: 'Consolas', monospace;
-  font-size: 13px;
-  white-space: nowrap;
-}
-
-/* 命令确认栏 */
-.command-confirm-bar {
-  padding: 10px 12px;
-  background: #2d2d30;
-  border-radius: 4px;
-  border: 1px solid #ffc107;
-}
-
-.confirm-label {
-  color: #ffc107;
-  font-size: 13px;
-  margin-bottom: 8px;
-}
-
-.confirm-command-wrapper {
-  background: #1e1e1e;
-  padding: 8px 12px;
-  border-radius: 4px;
-  margin-bottom: 8px;
-  min-height: 32px;
-}
-
-.confirm-command-text {
-  color: #4ec9b0;
-  font-family: 'Consolas', monospace;
-  font-size: 14px;
-  word-break: break-all;
-  white-space: pre-wrap;
-}
-
-/* 内联编辑输入框样式 */
-.command-edit-input :deep(.el-textarea__inner) {
+::-webkit-scrollbar-track {
   background: transparent;
-  border: 1px solid #4ec9b0;
-  color: #4ec9b0;
-  font-family: 'Consolas', monospace;
-  font-size: 14px;
-  padding: 4px 8px;
 }
 
-.confirm-actions {
-  display: flex;
-  gap: 8px;
+::-webkit-scrollbar-thumb {
+  background: #30363d;
+  border-radius: 3px;
 }
 
-.shortcut {
-  font-size: 11px;
-  opacity: 0.7;
-  margin-left: 4px;
-}
-
-/* 等待提示栏 */
-.waiting-bar {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  color: #aaa;
-  font-size: 13px;
-  padding: 8px 0;
-}
-
-.waiting-bar .is-loading {
-  color: #409eff;
-}
-
-/* 交互式程序检测提示栏 */
-.interactive-bar {
-  padding: 10px 12px;
-  background: #2d2d30;
-  border-radius: 4px;
-  border: 1px solid #e6a23c;
-}
-
-.interactive-header {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
-  color: #e6a23c;
-  font-size: 14px;
-}
-
-.interactive-message {
-  flex: 1;
-}
-
-.interactive-elapsed {
-  color: #999;
-  font-size: 12px;
-}
-
-.interactive-actions {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  flex-wrap: wrap;
-}
-
-.interactive-actions .el-divider--vertical {
-  border-color: #555;
-  height: 20px;
-}
-
-.interactive-actions :deep(.el-input__wrapper) {
-  background: #1e1e1e;
-  border-color: #555;
-}
-
-.interactive-actions :deep(.el-input__inner) {
-  color: #d4d4d4;
+::-webkit-scrollbar-thumb:hover {
+  background: #484f58;
 }
 </style>

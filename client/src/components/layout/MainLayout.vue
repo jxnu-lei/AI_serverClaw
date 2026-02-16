@@ -83,9 +83,11 @@
       
       <!-- 内容区域 -->
       <el-main>
-        <router-view v-slot="{ Component }">
+        <router-view v-slot="{ Component, route }">
           <transition name="fade" mode="out-in">
-            <component :is="Component" />
+            <keep-alive :include="['WorkspaceView']">
+              <component :is="Component" :key="route.path" />
+            </keep-alive>
           </transition>
         </router-view>
       </el-main>
@@ -108,7 +110,7 @@ const activeMenu = computed(() => {
 })
 
 const userName = computed(() => {
-  return localStorage.getItem('user_name') || '用户'
+  return sessionStorage.getItem('user_name') || '用户'
 })
 
 const userInitial = computed(() => {
@@ -116,7 +118,7 @@ const userInitial = computed(() => {
 })
 
 const isAdmin = computed(() => {
-  return localStorage.getItem('user_role') === 'admin'
+  return sessionStorage.getItem('user_role') === 'admin'
 })
 
 const toggleCollapse = () => {
@@ -124,7 +126,7 @@ const toggleCollapse = () => {
 }
 
 const handleLogout = () => {
-  localStorage.clear()
+  sessionStorage.clear()
   ElMessage.success('已退出登录')
   router.push('/login')
 }
@@ -139,7 +141,7 @@ const navigateToSettings = () => {
 
 onMounted(() => {
   // 检查登录状态
-  const token = localStorage.getItem('access_token')
+  const token = sessionStorage.getItem('access_token')
   if (!token) {
     router.push('/login')
   }

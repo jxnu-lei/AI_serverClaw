@@ -195,6 +195,27 @@
         </el-card>
       </el-tab-pane>
     </el-tabs>
+    
+    <!-- 修改密码对话框 -->
+    <el-dialog title="修改密码" v-model="changePasswordDialogVisible" width="450px">
+      <el-form :model="passwordForm" :rules="passwordRules" ref="passwordFormRef" label-width="120px">
+        <el-form-item label="当前密码" prop="currentPassword">
+          <el-input v-model="passwordForm.currentPassword" type="password" placeholder="请输入当前密码" show-password />
+        </el-form-item>
+        
+        <el-form-item label="新密码" prop="newPassword">
+          <el-input v-model="passwordForm.newPassword" type="password" placeholder="请输入新密码" show-password />
+        </el-form-item>
+        
+        <el-form-item label="确认新密码" prop="confirmPassword">
+          <el-input v-model="passwordForm.confirmPassword" type="password" placeholder="请确认新密码" show-password />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="changePasswordDialogVisible = false">取消</el-button>
+        <el-button type="primary" @click="submitChangePassword">确定</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
@@ -370,7 +391,7 @@ const savePersonalSettings = async () => {
 
   try {
     await personalFormRef.value.validate()
-    const userId = localStorage.getItem('user_id')
+    const userId = sessionStorage.getItem('user_id')
     if (!userId) {
       ElMessage.error('请先登录')
       return
@@ -384,7 +405,7 @@ const savePersonalSettings = async () => {
     const resp = await http.put(`/api/admin/users/${userId}`, payload)
 
     // 同步本地信息
-    localStorage.setItem('user_name', resp.data.username)
+    sessionStorage.setItem('user_name', resp.data.username)
     ElMessage.success('个人设置已保存')
   } catch (error: any) {
     console.error('保存个人设置失败:', error)
@@ -522,19 +543,87 @@ const saveSystemSettings = async () => {
   }
 }
 
+// 修改密码对话框
+const changePasswordDialogVisible = ref(false)
+const passwordForm = reactive({
+  currentPassword: '',
+  newPassword: '',
+  confirmPassword: ''
+})
+const passwordRules = {
+  currentPassword: [
+    { required: true, message: '请输入当前密码', trigger: 'blur' }
+  ],
+  newPassword: [
+    { required: true, message: '请输入新密码', trigger: 'blur' },
+    { min: 6, message: '新密码长度至少6个字符', trigger: 'blur' }
+  ],
+  confirmPassword: [
+    { required: true, message: '请确认新密码', trigger: 'blur' },
+    {
+      validator: (rule, value, callback) => {
+        if (value !== passwordForm.newPassword) {
+          callback(new Error('两次输入的密码不一致'))
+        } else {
+          callback()
+        }
+      },
+      trigger: 'blur'
+    }
+  ]
+}
+const passwordFormRef = ref()
+
 // 打开修改密码对话框
 const openChangePasswordDialog = () => {
-  // 后端当前未提供专门的修改密码接口，建议用户通过重置流程或在未来实现。
-  ElMessageBox.alert('当前后端未提供在线修改密码接口；如果需要，请联系管理员或使用重置流程。', '修改密码', {
-    confirmButtonText: '知道了',
-    type: 'info'
+  // 重置表单
+  Object.assign(passwordForm, {
+    currentPassword: '',
+    newPassword: '',
+    confirmPassword: ''
   })
+  if (passwordFormRef.value) {
+    passwordFormRef.value.clearValidate()
+  }
+  changePasswordDialogVisible.value = true
+}
+
+// 提交修改密码
+const submitChangePassword = async () => {
+  if (!passwordFormRef.value) return
+  
+  try {
+    await passwordFormRef.value.validate()
+    
+    const userId = sessionStorage.getItem('user_id')
+    if (!userId) {
+      ElMessage.error('请先登录')
+      return
+    }
+    
+    // 调用用户更新接口修改密码
+    await http.put(`/api/admin/users/${userId}`, {
+      password: passwordForm.newPassword
+    })
+    
+    ElMessage.success('密码修改成功，请重新登录')
+    changePasswordDialogVisible.value = false
+    
+    // 跳转到登录页
+    setTimeout(() => {
+      localStorage.clear()
+      window.location.href = '/login'
+    }, 1500)
+  } catch (error: any) {
+    console.error('修改密码失败:', error)
+    ElMessage.error(error?.response?.data?.detail || '修改密码失败')
+  }
 }
 
 // 初始化设置
 const initSettings = async () => {
   // 从 localStorage 读取基本用户信息
-  personalForm.username = localStorage.getItem('user_name') || ''
+  personalForm.username = sessionStorage.getItem('user_name') || ''
   personalForm.email = ''
 
   // 加载前端已保存的系统设置（回退到默认）
@@ -553,7 +642,7 @@ const initSettings = async () => {
     const res = await http.get('/api/auth/me')
     personalForm.username = res.data.username || personalForm.username
     personalForm.email = res.data.email || personalForm.email
-    localStorage.setItem('user_name', res.data.username || localStorage.getItem('user_name') || '')
+    sessionStorage.setItem('user_name', res.data.username || sessionStorage.getItem('user_name') || '')
   } catch (e) {
     // 忽略获取用户失败
   }

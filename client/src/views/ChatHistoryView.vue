@@ -12,11 +12,6 @@
         >
           <template #prefix><el-icon><Search /></el-icon></template>
         </el-input>
-        <el-select v-model="statusFilter" placeholder="状态" clearable style="width: 120px;" @change="loadSessions">
-          <el-option label="全部" value="" />
-          <el-option label="进行中" value="active" />
-          <el-option label="已完成" value="completed" />
-        </el-select>
       </div>
     </div>
 
@@ -33,13 +28,7 @@
       <el-table-column prop="host" label="服务器" width="180" />
       <el-table-column prop="message_count" label="消息数" width="80" align="center" />
       <el-table-column prop="command_count" label="命令数" width="80" align="center" />
-      <el-table-column prop="status" label="状态" width="100" align="center">
-        <template #default="{ row }">
-          <el-tag :type="row.status === 'active' ? 'success' : 'info'" size="small">
-            {{ row.status === 'active' ? '进行中' : '已完成' }}
-          </el-tag>
-        </template>
-      </el-table-column>
+
       <el-table-column prop="duration" label="时长" width="100">
         <template #default="{ row }">
           {{ formatDuration(row.duration) }}
@@ -50,7 +39,7 @@
           {{ formatTime(row.created_at) }}
         </template>
       </el-table-column>
-      <el-table-column label="操作" width="120" fixed="right">
+      <el-table-column label="操作" width="160" fixed="right">
         <template #default="{ row }">
           <el-button size="small" @click.stop="viewSession(row)">查看</el-button>
           <el-popconfirm title="确定删除？" @confirm="deleteSession(row.id)">
@@ -174,7 +163,6 @@ import { http } from '@/utils/api'
 const sessions = ref<any[]>([])
 const loading = ref(false)
 const searchText = ref('')
-const statusFilter = ref('')
 const currentPage = ref(1)
 const pageSize = 20
 const total = ref(0)
@@ -184,14 +172,18 @@ const detailSession = ref<any>(null)
 
 let searchDebounce: ReturnType<typeof setTimeout> | null = null
 
-const loadSessions = async () => {
+const loadSessions = async (newPage?: number) => {
+  // 如果传入了新页码，更新currentPage
+  if (newPage) {
+    currentPage.value = newPage
+  }
+  
   loading.value = true
   try {
     const params: any = { page: currentPage.value, page_size: pageSize }
-    if (statusFilter.value) params.status = statusFilter.value
     if (searchText.value) params.search = searchText.value
     
-    const res = await http.get('/api/chat-history/sessions', { params })
+    const res = await http.get('/api/chat-history/sessions', params)
     const data = res.data || res
     sessions.value = data.items || []
     total.value = data.total || 0
@@ -255,7 +247,146 @@ onMounted(() => loadSessions())
 .page-header { display: flex; justify-content: space-between; align-items: center; margin-bottom: 20px; }
 .page-header h1 { margin: 0; }
 .header-actions { display: flex; gap: 12px; }
-.pagination-wrapper { margin-top: 20px; display: flex; justify-content: center; }
+.pagination-wrapper { margin-top: 30px; margin-bottom: 20px; display: flex; justify-content: center; }
+
+/* 分页样式优化 */
+:deep(.el-pagination) {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 12px 20px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  box-shadow: 0 2px 4px rgba(0, 0, 0, 0.05);
+}
+
+:deep(.el-pagination__total) {
+  font-size: 14px;
+  color: #6c757d;
+  font-weight: 500;
+}
+
+:deep(.el-pagination__sizes) {
+  margin: 0;
+}
+
+:deep(.el-pagination__sizes .el-input .el-input__inner) {
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+  transition: all 0.3s ease;
+}
+
+:deep(.el-pagination__sizes .el-input .el-input__inner:hover) {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+:deep(.el-pagination__prev),
+:deep(.el-pagination__next) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+  background: #ffffff;
+  color: #6c757d;
+  cursor: pointer;
+  transition: all 0.3s ease;
+}
+
+:deep(.el-pagination__prev:hover),
+:deep(.el-pagination__next:hover) {
+  border-color: #409eff;
+  color: #409eff;
+  background: #ecf5ff;
+}
+
+:deep(.el-pagination__prev.is-disabled),
+:deep(.el-pagination__next.is-disabled) {
+  border-color: #dee2e6;
+  color: #c9ccd4;
+  background: #f8f9fa;
+  cursor: not-allowed;
+}
+
+:deep(.el-pagination__page-btn) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 32px;
+  height: 32px;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+  background: #ffffff;
+  color: #6c757d;
+  cursor: pointer;
+  transition: all 0.3s ease;
+  margin: 0 2px;
+}
+
+:deep(.el-pagination__page-btn:hover:not(.is-disabled)) {
+  border-color: #409eff;
+  color: #409eff;
+  background: #ecf5ff;
+}
+
+:deep(.el-pagination__page-btn.is-current) {
+  border-color: #409eff;
+  color: #ffffff;
+  background: #409eff;
+  font-weight: 600;
+  box-shadow: 0 2px 4px rgba(64, 158, 255, 0.3);
+}
+
+:deep(.el-pagination__jump) {
+  font-size: 14px;
+  color: #6c757d;
+}
+
+:deep(.el-pagination__jump .el-input .el-input__inner) {
+  width: 60px;
+  border-radius: 4px;
+  border: 1px solid #dee2e6;
+  transition: all 0.3s ease;
+}
+
+:deep(.el-pagination__jump .el-input .el-input__inner:hover) {
+  border-color: #409eff;
+  box-shadow: 0 0 0 2px rgba(64, 158, 255, 0.2);
+}
+
+/* 响应式设计 */
+@media (max-width: 768px) {
+  :deep(.el-pagination) {
+    padding: 8px 12px;
+    flex-wrap: wrap;
+  }
+  
+  :deep(.el-pagination__total) {
+    font-size: 13px;
+  }
+  
+  :deep(.el-pagination__page-btn),
+  :deep(.el-pagination__prev),
+  :deep(.el-pagination__next) {
+    width: 28px;
+    height: 28px;
+    font-size: 13px;
+  }
+}
+
+@media (max-width: 480px) {
+  :deep(.el-pagination) {
+    gap: 4px;
+  }
+  
+  :deep(.el-pagination__sizes),
+  :deep(.el-pagination__jump) {
+    display: none;
+  }
+}
 
 .session-title { display: flex; align-items: center; gap: 8px; cursor: pointer; }
 .session-title:hover { color: #409eff; }
@@ -279,4 +410,13 @@ onMounted(() => loadSessions())
 .msg-command-suggest { margin-top: 8px; }
 .suggest-label { color: #e6a23c; font-size: 13px; }
 .msg-output { margin: 0; font-family: Consolas, monospace; font-size: 13px; white-space: pre-wrap; word-break: break-all; max-height: 300px; overflow-y: auto; }
+
+/* 操作栏按钮样式 */
+.el-table__fixed-right .el-button {
+  margin-right: 8px;
+}
+
+.el-table__fixed-right .el-button:last-child {
+  margin-right: 0;
+}
 </style>

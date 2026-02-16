@@ -71,8 +71,8 @@ const router = createRouter({
 
 // 路由守卫
 router.beforeEach((to, _from, next) => {
-  const isAuthenticated = localStorage.getItem('access_token')
-  const userRole = localStorage.getItem('user_role')
+  const isAuthenticated = sessionStorage.getItem('access_token')
+  const userRole = sessionStorage.getItem('user_role')
 
   if (to.meta.requiresAuth && !isAuthenticated) {
     return next({ name: 'Login', query: { redirect: to.fullPath } })

@@ -153,7 +153,7 @@ const createRules = {
 
 // 检查当前用户是否是管理员
 const isAdmin = computed(() => {
-  return localStorage.getItem('user_role') === 'admin'
+  return sessionStorage.getItem('user_role') === 'admin'
 })
 
 const loadUsers = async () => {
