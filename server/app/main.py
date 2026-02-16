@@ -1,14 +1,3 @@
-import sys
-import os
-
-# 设置系统默认编码为 UTF-8
-sys.stdout.reconfigure(encoding='utf-8')
-sys.stderr.reconfigure(encoding='utf-8')
-
-# 删除 .env 文件，避免 Starlette 尝试读取它，从而避免 UnicodeDecodeError 错误
-if os.path.exists('.env'):
-    os.remove('.env')
-
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from slowapi import Limiter, _rate_limit_exceeded_handler
@@ -20,7 +9,7 @@ from app.database import engine, Base, init_db
 from app.config import settings
 
 # 导入路由
-from app.routes import auth, connections, llm, sessions, users
+from app.routes import auth, connections, llm, sessions, users, chat
 from app.routes import chat_history
 from app.ws import terminal
 
@@ -51,10 +40,10 @@ app.add_exception_handler(RateLimitExceeded, _rate_limit_exceeded_handler)
 # 配置 CORS
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=settings.CORS_ORIGINS,
+    allow_origins=["http://localhost:3000"],  # 明确指定允许的域名
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "PATCH"],  # 明确指定允许的方法
+    allow_headers=["Content-Type", "Authorization"],  # 明确指定允许的头部
 )
 
 # 注册路由
@@ -64,7 +53,8 @@ app.include_router(connections.router, prefix="/api/connections", tags=["连接�
 app.include_router(llm.router, prefix="/api/llm", tags=["LLM"])
 app.include_router(sessions.router, prefix="/api/sessions", tags=["会话"])
 app.include_router(chat_history.router, prefix="/api", tags=["对话历史"])
-app.include_router(terminal.router, prefix="/ws", tags=["终端"])
+app.include_router(chat.router, tags=["Chat"])
+app.include_router(terminal.router, prefix="/api/ws", tags=["终端"])
 
 
 # 根路径

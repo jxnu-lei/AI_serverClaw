@@ -3,6 +3,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy import select
 from typing import List
 import asyncssh
+import asyncio
 
 from app.database import get_db
 from app.models.connection import Connection
@@ -27,6 +28,10 @@ async def get_connections(
     current_user: User = Depends(get_current_active_user)
 ):
     """获取用户的服务器连接列表"""
+    # 安全限制：最大返回100条
+    limit = min(limit, 100)
+    skip = max(skip, 0)
+    
     result = await db.execute(
         select(Connection)
         .where(Connection.user_id == current_user.id)
@@ -34,7 +39,7 @@ async def get_connections(
         .limit(limit)
     )
     connections = result.scalars().all()
-    
+
     return [
         ConnectionSchema(
             id=str(conn.id),
@@ -61,19 +66,23 @@ async def get_connection(
     current_user: User = Depends(get_current_active_user)
 ):
     """获取连接详情"""
+    # 基本格式校验
+    if not connection_id or len(connection_id) > 36:
+        raise HTTPException(status_code=400, detail="Invalid connection_id")
+    
     result = await db.execute(
         select(Connection)
         .where(Connection.id == connection_id)
         .where(Connection.user_id == current_user.id)
     )
     connection = result.scalars().one_or_none()
-    
+
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Connection not found"
         )
-    
+
     return ConnectionSchema(
         id=str(connection.id),
         name=connection.name,
@@ -104,6 +113,18 @@ async def create_connection(
     current_user: User = Depends(get_current_active_user)
 ):
     """创建新的服务器连接"""
+    # 检查用户连接数量限制（防止滥用）
+    count_result = await db.execute(
+        select(Connection)
+        .where(Connection.user_id == current_user.id)
+    )
+    existing_count = len(count_result.scalars().all())
+    if existing_count >= 50:  # 每用户最多50个连接
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Maximum number of connections reached (50)"
+        )
+    
     # 检查连接名称是否已存在
     result = await db.execute(
         select(Connection)
@@ -115,15 +136,13 @@ async def create_connection(
             status_code=status.HTTP_400_BAD_REQUEST,
             detail="Connection name already exists"
         )
-    
-    # 创建新连接
-    # 记录请求上下文，便于排查
+
     try:
         payload: dict[str, Any] = {
-            "name": connection_create.name,
-            "host": connection_create.host,
+            "name": connection_create.name.strip(),
+            "host": connection_create.host.strip(),
             "port": int(connection_create.port),
-            "username": connection_create.username,
+            "username": connection_create.username.strip(),
             "password": connection_create.password,
             "private_key": connection_create.private_key,
             "auth_method": connection_create.auth_method,
@@ -131,21 +150,23 @@ async def create_connection(
             "tags": connection_create.tags,
             "user_id": current_user.id
         }
-    except Exception as e:
+    except Exception:
         logger.exception("Invalid connection payload")
-        raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail="Invalid connection payload")
+        raise HTTPException(status_code=400, detail="Invalid connection payload")
 
-    # tags 可能为列表，数据库模型为 Text，转为逗号分隔字符串
+    # 端口范围校验
+    if not (1 <= payload["port"] <= 65535):
+        raise HTTPException(status_code=400, detail="Port must be between 1 and 65535")
+
+    # tags处理
     tags_val = payload.get("tags")
     if isinstance(tags_val, (list, tuple)):
         try:
-            payload["tags"] = ",".join([str(t) for t in tags_val])
+            payload["tags"] = ",".join([str(t).strip() for t in tags_val if str(t).strip()])
         except Exception:
-            payload["tags"] = str(tags_val)
+            payload["tags"] = ""
 
     try:
-        # logger.debug('Creating connection for user %s', current_user.id)
-
         new_connection = Connection(
             name=payload["name"],
             host=payload["host"],
@@ -162,21 +183,13 @@ async def create_connection(
         await db.commit()
         await db.refresh(new_connection)
     except Exception as e:
-        tb = traceback.format_exc()
         logger.exception("Error creating connection: %s", e)
-        # 额外写入文件，便于在无控制台输出时排查
         try:
-            from pathlib import Path
-            root = Path(__file__).resolve().parents[3]
-            log_path = root / 'create_connection_error.log'
-            with open(str(log_path), 'a', encoding='utf-8') as f:
-                f.write(f"--- {__import__('datetime').datetime.utcnow().isoformat()} UTC ---\n")
-                f.write(tb + '\n')
+            await db.rollback()
         except Exception:
             pass
-        # 返回更明确的错误信息（避免泄露敏感信息）
-        raise HTTPException(status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Failed to create connection")
-    
+        raise HTTPException(status_code=500, detail="Failed to create connection")
+
     return JSONResponse({
         "id": str(new_connection.id),
         "name": new_connection.name,
@@ -199,27 +212,48 @@ async def update_connection(
     current_user: User = Depends(get_current_active_user)
 ):
     """更新服务器连接"""
+    if not connection_id or len(connection_id) > 36:
+        raise HTTPException(status_code=400, detail="Invalid connection_id")
+    
     result = await db.execute(
         select(Connection)
         .where(Connection.id == connection_id)
         .where(Connection.user_id == current_user.id)
     )
     connection = result.scalars().one_or_none()
-    
+
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Connection not found"
         )
-    
-    # 更新连接信息
+
     update_data = connection_update.model_dump(exclude_unset=True)
+    
+    # 安全过滤：不允许通过update修改user_id
+    update_data.pop('user_id', None)
+    
+    # 端口校验
+    if 'port' in update_data:
+        port = int(update_data['port'])
+        if not (1 <= port <= 65535):
+            raise HTTPException(status_code=400, detail="Port must be between 1 and 65535")
+    
     for field, value in update_data.items():
-        setattr(connection, field, value)
-    
-    await db.commit()
-    await db.refresh(connection)
-    
+        if hasattr(connection, field):
+            setattr(connection, field, value)
+
+    try:
+        await db.commit()
+        await db.refresh(connection)
+    except Exception as e:
+        logger.exception("Error updating connection: %s", e)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to update connection")
+
     return ConnectionSchema(
         id=str(connection.id),
         name=connection.name,
@@ -243,22 +277,33 @@ async def delete_connection(
     current_user: User = Depends(get_current_active_user)
 ):
     """删除服务器连接"""
+    if not connection_id or len(connection_id) > 36:
+        raise HTTPException(status_code=400, detail="Invalid connection_id")
+    
     result = await db.execute(
         select(Connection)
         .where(Connection.id == connection_id)
         .where(Connection.user_id == current_user.id)
     )
     connection = result.scalars().one_or_none()
-    
+
     if not connection:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail="Connection not found"
         )
-    
-    await db.delete(connection)
-    await db.commit()
-    
+
+    try:
+        await db.delete(connection)
+        await db.commit()
+    except Exception as e:
+        logger.exception("Error deleting connection: %s", e)
+        try:
+            await db.rollback()
+        except Exception:
+            pass
+        raise HTTPException(status_code=500, detail="Failed to delete connection")
+
     return {"message": "Connection deleted successfully"}
 
 
@@ -268,30 +313,67 @@ async def test_connection(
     current_user: User = Depends(get_current_active_user)
 ):
     """测试服务器连接"""
+    import tempfile
+    import os
+    import stat
+    
+    key_file = None
+    
     try:
-        # 测试SSH连接
-        async with asyncssh.connect(
-            host=connection_test.host,
-            port=connection_test.port,
-            username=connection_test.username,
-            password=connection_test.password if connection_test.auth_method == "password" else None,
-            client_keys=None if connection_test.auth_method == "password" or not connection_test.private_key else [connection_test.private_key],
-            known_hosts=None,  # 不验证主机密钥（仅用于测试）
-            timeout=10
-        ) as conn:
-            # 连接成功
+        ssh_options = {
+            "host": connection_test.host,
+            "port": connection_test.port or 22,
+            "username": connection_test.username,
+            "known_hosts": None,
+        }
+        
+        if connection_test.auth_method == "password":
+            if not connection_test.password:
+                raise HTTPException(status_code=400, detail="密码不能为空")
+            ssh_options["password"] = connection_test.password
+        elif connection_test.auth_method == "private_key":
+            if not connection_test.private_key:
+                raise HTTPException(status_code=400, detail="私钥不能为空")
+            # 创建临时私钥文件
+            with tempfile.NamedTemporaryFile(
+                mode='w', delete=False, suffix='.key', prefix='ssh_test_'
+            ) as f:
+                f.write(connection_test.private_key)
+                key_file = f.name
+            os.chmod(key_file, stat.S_IRUSR)
+            ssh_options["client_keys"] = [key_file]
+            if hasattr(connection_test, 'passphrase') and connection_test.passphrase:
+                ssh_options["passphrase"] = connection_test.passphrase
+        else:
+            # 默认密码认证
+            if connection_test.password:
+                ssh_options["password"] = connection_test.password
+            else:
+                raise HTTPException(status_code=400, detail="请提供密码或私钥")
+        
+        # 测试连接（注意：必须在key_file删除之前完成）
+        async with asyncssh.connect(**ssh_options) as conn:
             return ConnectionTestResponse(
                 status="success",
                 message="连接测试成功",
                 host=connection_test.host
             )
-    except asyncssh.ConnectionError as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"连接失败: {str(e)}"
-        )
+    
+    except asyncssh.PermissionDenied:
+        raise HTTPException(status_code=400, detail="认证失败：用户名或密码/密钥错误")
+    except asyncssh.DisconnectError as e:
+        raise HTTPException(status_code=400, detail=f"SSH连接被拒绝: {str(e)}")
+    except asyncio.TimeoutError:
+        raise HTTPException(status_code=400, detail="连接超时（10秒）")
+    except OSError as e:
+        raise HTTPException(status_code=400, detail=f"网络错误: 无法连接到 {connection_test.host}:{connection_test.port} ({str(e)})")
     except Exception as e:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"测试失败: {str(e)}"
-        )
+        logger.warning(f"Connection test failed: {type(e).__name__}: {e}")
+        raise HTTPException(status_code=400, detail=f"测试失败: {str(e)}")
+    finally:
+        # 确保清理临时密钥文件
+        if key_file:
+            try:
+                os.unlink(key_file)
+            except OSError:
+                pass

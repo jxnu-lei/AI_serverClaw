@@ -37,14 +37,8 @@ class Settings(BaseSettings):
     DEFAULT_ADMIN_PASSWORD: str = "admin!123"
     DEFAULT_ADMIN_EMAIL: str = "admin@example.com"
 
-    # 额外的环境变量，用于兼容 Docker 部署
-    API_HOST: str = "http://localhost:8000"
-    HOST: str = "0.0.0.0"
-    PORT: int = 8000
-
     class Config:
         env_file = ".env"
-        env_file_encoding = "utf-8"
         case_sensitive = True
 
 

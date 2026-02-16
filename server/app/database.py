@@ -49,7 +49,7 @@ async def init_db():
         await conn.run_sync(Base.metadata.create_all)
         
         # 创建默认管理员
-        pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+        pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
         
         def _create_default_admin(sync_conn):
             # 检查是否已有管理员

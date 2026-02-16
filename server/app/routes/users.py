@@ -165,7 +165,13 @@ async def update_user(
     # 更新用户信息
     update_data = user_update.model_dump(exclude_unset=True)
     for field, value in update_data.items():
-        setattr(user, field, value)
+        if field == 'password' and value:
+            # 密码需要哈希处理
+            from passlib.context import CryptContext
+            pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+            setattr(user, field, pwd_context.hash(value))
+        else:
+            setattr(user, field, value)
     
     await db.commit()
     await db.refresh(user)

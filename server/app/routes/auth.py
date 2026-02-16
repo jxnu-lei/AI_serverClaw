@@ -1,3 +1,4 @@
+import logging
 from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -13,8 +14,12 @@ from app.schemas.auth import Token, TokenData, LoginRequest, RegisterRequest
 from app.schemas.user import User as UserSchema
 from app.config import settings
 
+# 配置日志
+logger = logging.getLogger(__name__)
+logging.basicConfig(level=logging.INFO)
+
 router = APIRouter()
-pwd_context = CryptContext(schemes=["pbkdf2_sha256"], deprecated="auto")
+pwd_context = CryptContext(schemes=["bcrypt", "pbkdf2_sha256"], deprecated="auto")
 oauth2_scheme = OAuth2PasswordBearer(tokenUrl="/api/auth/login")
 
 
@@ -38,9 +43,12 @@ async def authenticate_user(db: AsyncSession, username: str, password: str) -> O
     """认证用户"""
     user = await get_user(db, username)
     if not user:
+        logger.warning(f"Login failed: user {username} not found")
         return None
     if not verify_password(password, user.password):
+        logger.warning(f"Login failed: incorrect password for user {username}")
         return None
+    logger.info(f"User {username} authenticated successfully")
     return user
 
 
@@ -99,6 +107,7 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
         data={"sub": user.username},
         expires_delta=access_token_expires
     )
+    logger.info(f"User {user.username} logged in successfully, token generated")
     return {
         "access_token": access_token,
         "token_type": "bearer",
@@ -113,10 +122,10 @@ async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends(
 
 
 @router.post("/register", response_model=UserSchema)
-async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get_db)):
+async def register_user(register_data: RegisterRequest, db: AsyncSession = Depends(get_db)):
     """用户注册"""
     # 检查用户名是否已存在
-    existing_user = await get_user(db, request.username)
+    existing_user = await get_user(db, register_data.username)
     if existing_user:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -124,7 +133,7 @@ async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get
         )
     
     # 检查邮箱是否已存在
-    result = await db.execute(select(User).where(User.email == request.email))
+    result = await db.execute(select(User).where(User.email == register_data.email))
     if result.scalars().one_or_none():
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -132,10 +141,10 @@ async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get
         )
     
     # 创建新用户
-    hashed_password = get_password_hash(request.password)
+    hashed_password = get_password_hash(register_data.password)
     new_user = User(
-        username=request.username,
-        email=request.email,
+        username=register_data.username,
+        email=register_data.email,
         password=hashed_password,
         role="user",  # 默认角色
         is_active=True
@@ -145,6 +154,8 @@ async def register_user(request: RegisterRequest, db: AsyncSession = Depends(get
     db.add(new_user)
     await db.commit()
     await db.refresh(new_user)
+    
+    logger.info(f"New user registered: {new_user.username} (email: {new_user.email})")
     
     return UserSchema(
         id=str(new_user.id),
